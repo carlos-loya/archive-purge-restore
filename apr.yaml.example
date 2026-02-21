@@ -1,0 +1,51 @@
+storage:
+  type: filesystem
+  filesystem:
+    base_path: /tmp/apr-archives
+  lifecycle:
+    transition_days: 30
+    expiration_days: 1460
+
+history:
+  path: /tmp/apr/history.db
+
+rules:
+  - name: crk-plans
+    schedule: "0 3 * * *"
+    batch_size: 10000
+    source:
+      engine: postgres
+      host: mydb.example.com
+      port: 5432
+      database: crk_db
+      credentials:
+        type: env
+        username_env: DB_USER
+        password_env: DB_PASS
+    tables:
+      - name: trans_detail
+        date_column: transaction_date
+        days_online: 21
+      - name: beneficiary
+        date_column: created_at
+        days_online: 21
+
+  - name: orders
+    schedule: "0 4 * * *"
+    batch_size: 5000
+    source:
+      engine: mysql
+      host: mysql.example.com
+      port: 3306
+      database: orders_db
+      credentials:
+        type: env
+        username_env: MYSQL_USER
+        password_env: MYSQL_PASS
+    tables:
+      - name: order_items
+        date_column: created_at
+        days_online: 90
+      - name: order_history
+        date_column: event_date
+        days_online: 30
