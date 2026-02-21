@@ -1,0 +1,49 @@
+storage:
+  type: filesystem
+  filesystem:
+    base_path: /tmp/apr-dev-archives
+
+history:
+  path: /tmp/apr-dev-history.db
+
+rules:
+  - name: pg-test
+    schedule: "0 2 * * *"
+    batch_size: 100
+    source:
+      engine: postgres
+      host: localhost
+      port: 15432
+      database: apr_test_pg
+      ssl_mode: disable
+      credentials:
+        type: static
+        username: apr_test
+        password: apr_test_pass
+    tables:
+      - name: orders
+        date_column: created_at
+        days_online: 30
+      - name: order_items
+        date_column: created_at
+        days_online: 30
+
+  - name: my-test
+    schedule: "0 2 * * *"
+    batch_size: 100
+    source:
+      engine: mysql
+      host: localhost
+      port: 13306
+      database: apr_test_my
+      credentials:
+        type: static
+        username: apr_test
+        password: apr_test_pass
+    tables:
+      - name: orders
+        date_column: created_at
+        days_online: 30
+      - name: order_items
+        date_column: created_at
+        days_online: 30

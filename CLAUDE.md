@@ -6,9 +6,16 @@ A Go CLI tool that archives old database rows to object storage as Parquet files
 
 ```bash
 make build          # Build binary → ./apr
-make test           # go test ./... -v
+make test           # go test ./... -v (unit tests only)
 make lint           # go vet ./...
 make clean          # Remove binary
+
+# Integration tests (requires Docker):
+make dev-up          # Start PostgreSQL 16 + MySQL 8.0 in Docker
+make dev-down        # Stop containers, remove volumes
+make dev-reset       # dev-down + dev-up (clean slate)
+make test-integration # dev-up + run integration tests
+make test-all        # Unit tests + integration tests
 
 # Build with version:
 go build -ldflags "-X main.version=1.0.0" -o apr ./cmd/apr
@@ -24,6 +31,12 @@ go test ./internal/config/ -v -run TestValidate
 
 ```
 cmd/apr/main.go                          # CLI entry point, wires all components together
+dev/
+  docker-compose.yml                     # PostgreSQL 16 + MySQL 8.0 for integration tests
+  apr.dev.yaml                           # Dev config pointing at Docker containers
+  seed/postgres/{01_schema,02_data}.sql  # Seed schema and data for PostgreSQL
+  seed/mysql/{01_schema,02_data}.sql     # Seed schema and data for MySQL
+integration/integration_test.go          # End-to-end tests (build tag: integration)
 internal/
   config/config.go                       # YAML config parsing, validation, defaults
   engine/
@@ -114,6 +127,6 @@ apr version
 - **Identifier quoting**: PostgreSQL uses `"double_quotes"` with `$N` placeholders; MySQL uses `` `backticks` `` with `?` placeholders
 - **Errors**: Always wrap with `fmt.Errorf("context: %w", err)`
 - **File layout**: Interfaces in `provider.go`, implementations in `{engine}.go`, tests in `*_test.go` (same package)
-- **Tests**: Use `t.TempDir()` for filesystem tests, mock `database.Provider` for engine tests (see `archiver_test.go` for the mock pattern)
+- **Tests**: Use `t.TempDir()` for filesystem tests, mock `database.Provider` for engine tests (see `archiver_test.go` for the mock pattern). Integration tests use `//go:build integration` tag and run against Docker containers
 - **Parquet type mapping**: DB types normalize via `normalizeType()` in `format/parquet.go` — int/smallint→int32, bigint→int64, real→float32, double→float64, bool→bool, everything else→string
 - **Sanitization**: Archive path components replace non-alphanumeric characters (except `-` and `_`) with `_`
