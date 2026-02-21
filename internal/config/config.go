@@ -1,0 +1,248 @@
+package config
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"gopkg.in/yaml.v3"
+)
+
+type Config struct {
+	Storage StorageConfig `yaml:"storage"`
+	History HistoryConfig `yaml:"history"`
+	Rules   []Rule        `yaml:"rules"`
+}
+
+type StorageConfig struct {
+	Type       string          `yaml:"type"`
+	S3         *S3Config       `yaml:"s3,omitempty"`
+	Filesystem *FSConfig       `yaml:"filesystem,omitempty"`
+	Lifecycle  LifecycleConfig `yaml:"lifecycle"`
+}
+
+type S3Config struct {
+	Bucket   string `yaml:"bucket"`
+	Region   string `yaml:"region"`
+	Prefix   string `yaml:"prefix"`
+	Endpoint string `yaml:"endpoint,omitempty"`
+}
+
+type FSConfig struct {
+	BasePath string `yaml:"base_path"`
+}
+
+type LifecycleConfig struct {
+	TransitionDays int `yaml:"transition_days"`
+	ExpirationDays int `yaml:"expiration_days"`
+}
+
+type HistoryConfig struct {
+	Path string `yaml:"path"`
+}
+
+type Rule struct {
+	Name      string       `yaml:"name"`
+	Schedule  string       `yaml:"schedule"`
+	BatchSize int          `yaml:"batch_size"`
+	Source    SourceConfig `yaml:"source"`
+	Tables    []TableConfig `yaml:"tables"`
+}
+
+type SourceConfig struct {
+	Engine      string          `yaml:"engine"`
+	Host        string          `yaml:"host"`
+	Port        int             `yaml:"port"`
+	Database    string          `yaml:"database"`
+	Credentials CredentialConfig `yaml:"credentials"`
+	SSLMode     string          `yaml:"ssl_mode,omitempty"`
+}
+
+type CredentialConfig struct {
+	Type        string `yaml:"type"`
+	UsernameEnv string `yaml:"username_env,omitempty"`
+	PasswordEnv string `yaml:"password_env,omitempty"`
+	Username    string `yaml:"username,omitempty"`
+	Password    string `yaml:"password,omitempty"`
+}
+
+type TableConfig struct {
+	Name       string `yaml:"name"`
+	DateColumn string `yaml:"date_column"`
+	DaysOnline int    `yaml:"days_online"`
+}
+
+func Load(path string) (*Config, error) {
+	if path != "" {
+		return loadFromFile(path)
+	}
+
+	searchPaths := []string{
+		"apr.yaml",
+		"apr.yml",
+	}
+
+	if home, err := os.UserHomeDir(); err == nil {
+		searchPaths = append(searchPaths,
+			filepath.Join(home, ".apr", "config.yaml"),
+			filepath.Join(home, ".apr", "config.yml"),
+		)
+	}
+
+	searchPaths = append(searchPaths,
+		"/etc/apr/config.yaml",
+		"/etc/apr/config.yml",
+	)
+
+	for _, p := range searchPaths {
+		if _, err := os.Stat(p); err == nil {
+			return loadFromFile(p)
+		}
+	}
+
+	return nil, fmt.Errorf("no config file found; searched: %s", strings.Join(searchPaths, ", "))
+}
+
+func loadFromFile(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("reading config file %s: %w", path, err)
+	}
+
+	var cfg Config
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parsing config file %s: %w", path, err)
+	}
+
+	cfg.applyDefaults()
+	return &cfg, nil
+}
+
+func (c *Config) applyDefaults() {
+	if c.History.Path == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			c.History.Path = filepath.Join(home, ".apr", "history.db")
+		} else {
+			c.History.Path = "/var/lib/apr/history.db"
+		}
+	}
+
+	for i := range c.Rules {
+		if c.Rules[i].BatchSize == 0 {
+			c.Rules[i].BatchSize = 10000
+		}
+		if c.Rules[i].Source.SSLMode == "" && c.Rules[i].Source.Engine == "postgres" {
+			c.Rules[i].Source.SSLMode = "prefer"
+		}
+	}
+}
+
+func (c *Config) Validate() error {
+	if c.Storage.Type == "" {
+		return fmt.Errorf("storage.type is required")
+	}
+
+	switch c.Storage.Type {
+	case "s3":
+		if c.Storage.S3 == nil {
+			return fmt.Errorf("storage.s3 configuration is required when type is s3")
+		}
+		if c.Storage.S3.Bucket == "" {
+			return fmt.Errorf("storage.s3.bucket is required")
+		}
+		if c.Storage.S3.Region == "" {
+			return fmt.Errorf("storage.s3.region is required")
+		}
+	case "filesystem":
+		if c.Storage.Filesystem == nil {
+			return fmt.Errorf("storage.filesystem configuration is required when type is filesystem")
+		}
+		if c.Storage.Filesystem.BasePath == "" {
+			return fmt.Errorf("storage.filesystem.base_path is required")
+		}
+	default:
+		return fmt.Errorf("unsupported storage type: %s (must be s3 or filesystem)", c.Storage.Type)
+	}
+
+	if len(c.Rules) == 0 {
+		return fmt.Errorf("at least one rule is required")
+	}
+
+	ruleNames := make(map[string]bool)
+	for i, rule := range c.Rules {
+		if rule.Name == "" {
+			return fmt.Errorf("rules[%d].name is required", i)
+		}
+		if ruleNames[rule.Name] {
+			return fmt.Errorf("duplicate rule name: %s", rule.Name)
+		}
+		ruleNames[rule.Name] = true
+
+		if err := validateRule(rule, i); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func validateRule(rule Rule, index int) error {
+	prefix := fmt.Sprintf("rules[%d] (%s)", index, rule.Name)
+
+	if rule.Source.Engine == "" {
+		return fmt.Errorf("%s: source.engine is required", prefix)
+	}
+	switch rule.Source.Engine {
+	case "postgres", "mysql":
+		// ok
+	default:
+		return fmt.Errorf("%s: unsupported engine: %s (must be postgres or mysql)", prefix, rule.Source.Engine)
+	}
+
+	if rule.Source.Host == "" {
+		return fmt.Errorf("%s: source.host is required", prefix)
+	}
+	if rule.Source.Port == 0 {
+		return fmt.Errorf("%s: source.port is required", prefix)
+	}
+	if rule.Source.Database == "" {
+		return fmt.Errorf("%s: source.database is required", prefix)
+	}
+
+	if rule.Source.Credentials.Type == "" {
+		return fmt.Errorf("%s: source.credentials.type is required", prefix)
+	}
+
+	if len(rule.Tables) == 0 {
+		return fmt.Errorf("%s: at least one table is required", prefix)
+	}
+
+	for j, table := range rule.Tables {
+		tPrefix := fmt.Sprintf("%s.tables[%d]", prefix, j)
+		if table.Name == "" {
+			return fmt.Errorf("%s: name is required", tPrefix)
+		}
+		if table.DateColumn == "" {
+			return fmt.Errorf("%s: date_column is required", tPrefix)
+		}
+		if table.DaysOnline <= 0 {
+			return fmt.Errorf("%s: days_online must be positive", tPrefix)
+		}
+	}
+
+	if rule.BatchSize <= 0 {
+		return fmt.Errorf("%s: batch_size must be positive", prefix)
+	}
+
+	return nil
+}
+
+func (c *Config) FindRule(name string) *Rule {
+	for i := range c.Rules {
+		if c.Rules[i].Name == name {
+			return &c.Rules[i]
+		}
+	}
+	return nil
+}

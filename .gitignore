@@ -1,0 +1,6 @@
+/apr
+*.exe
+*.test
+*.out
+.env
+vendor/
