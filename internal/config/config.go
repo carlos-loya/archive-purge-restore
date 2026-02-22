@@ -120,8 +120,15 @@ func loadFromFile(path string) (*Config, error) {
 }
 
 func (c *Config) applyDefaults() {
+	// Apply history path with precedence:
+	// 1. Config file value (highest priority - already set)
+	// 2. APR_HISTORY_PATH environment variable
+	// 3. Default home directory path
+	// 4. System default path (lowest priority)
 	if c.History.Path == "" {
-		if home, err := os.UserHomeDir(); err == nil {
+		if envPath := os.Getenv("APR_HISTORY_PATH"); envPath != "" {
+			c.History.Path = filepath.Clean(envPath)
+		} else if home, err := os.UserHomeDir(); err == nil {
 			c.History.Path = filepath.Join(home, ".apr", "history.db")
 		} else {
 			c.History.Path = "/var/lib/apr/history.db"

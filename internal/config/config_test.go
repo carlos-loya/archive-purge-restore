@@ -232,6 +232,91 @@ func TestValidate(t *testing.T) {
 	}
 }
 
+func TestHistoryPathFromEnvVar(t *testing.T) {
+	// Unset any existing env var to ensure clean state
+	os.Unsetenv("APR_HISTORY_PATH")
+	
+	content := `
+storage:
+  type: filesystem
+  filesystem:
+    base_path: /tmp/apr-test
+rules:
+  - name: test-rule
+    source:
+      engine: postgres
+      host: localhost
+      port: 5432
+      database: testdb
+      credentials:
+        type: env
+    tables:
+      - name: orders
+        date_column: created_at
+        days_online: 30
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("env var takes precedence over default", func(t *testing.T) {
+		// Set the environment variable
+		envPath := "/custom/path/history.db"
+		t.Setenv("APR_HISTORY_PATH", envPath)
+		
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		
+		if cfg.History.Path != envPath {
+			t.Errorf("History.Path = %q, want %q", cfg.History.Path, envPath)
+		}
+	})
+	
+	t.Run("config file takes precedence over env var", func(t *testing.T) {
+		// Set env var but also provide config value
+		t.Setenv("APR_HISTORY_PATH", "/env/path/history.db")
+		
+		contentWithHistory := content + `
+history:
+  path: /config/path/history.db
+`
+		pathWithHistory := filepath.Join(dir, "config-with-history.yaml")
+		if err := os.WriteFile(pathWithHistory, []byte(contentWithHistory), 0644); err != nil {
+			t.Fatal(err)
+		}
+		
+		cfg, err := Load(pathWithHistory)
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		
+		// Config file should win over env var
+		if cfg.History.Path != "/config/path/history.db" {
+			t.Errorf("History.Path = %q, want %q", cfg.History.Path, "/config/path/history.db")
+		}
+	})
+	
+	t.Run("env var cleaned with filepath.Clean", func(t *testing.T) {
+		// Set a messy path that needs cleaning
+		t.Setenv("APR_HISTORY_PATH", "/custom//path/../path/history.db")
+		
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		
+		// Should be cleaned
+		expected := "/custom/path/history.db"
+		if cfg.History.Path != expected {
+			t.Errorf("History.Path = %q, want cleaned path %q", cfg.History.Path, expected)
+		}
+	})
+}
+
 func TestFindRule(t *testing.T) {
 	cfg := &Config{
 		Rules: []Rule{
