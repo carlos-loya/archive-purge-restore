@@ -1,3 +1,4 @@
+// Package config provides YAML configuration loading and validation for APR.
 package config
 
 import (
@@ -9,19 +10,22 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Config holds the complete APR configuration including storage, history, and archive rules.
 type Config struct {
 	Storage StorageConfig `yaml:"storage"`
 	History HistoryConfig `yaml:"history"`
 	Rules   []Rule        `yaml:"rules"`
 }
 
+// StorageConfig defines the storage backend for archived data.
 type StorageConfig struct {
 	Type       string          `yaml:"type"`
 	S3         *S3Config       `yaml:"s3,omitempty"`
-	Filesystem *FSConfig       `yaml:"filesystem,omitempty"`
+	Filesystem *FSConfig        `yaml:"filesystem,omitempty"`
 	Lifecycle  LifecycleConfig `yaml:"lifecycle"`
 }
 
+// S3Config defines S3 storage settings.
 type S3Config struct {
 	Bucket   string `yaml:"bucket"`
 	Region   string `yaml:"region"`
@@ -29,36 +33,42 @@ type S3Config struct {
 	Endpoint string `yaml:"endpoint,omitempty"`
 }
 
+// FSConfig defines local filesystem storage settings.
 type FSConfig struct {
 	BasePath string `yaml:"base_path"`
 }
 
+// LifecycleConfig defines S3 lifecycle policies for archived data.
 type LifecycleConfig struct {
 	TransitionDays int `yaml:"transition_days"`
 	ExpirationDays int `yaml:"expiration_days"`
 }
 
+// HistoryConfig defines the SQLite history database location.
 type HistoryConfig struct {
 	Path string `yaml:"path"`
 }
 
+// Rule defines a single archive configuration rule.
 type Rule struct {
-	Name      string       `yaml:"name"`
-	Schedule  string       `yaml:"schedule"`
-	BatchSize int          `yaml:"batch_size"`
-	Source    SourceConfig `yaml:"source"`
-	Tables    []TableConfig `yaml:"tables"`
+	Name      string          `yaml:"name"`
+	Schedule  string          `yaml:"schedule"`
+	BatchSize int             `yaml:"batch_size"`
+	Source    SourceConfig    `yaml:"source"`
+	Tables    []TableConfig   `yaml:"tables"`
 }
 
+// SourceConfig defines database connection settings.
 type SourceConfig struct {
-	Engine      string          `yaml:"engine"`
-	Host        string          `yaml:"host"`
-	Port        int             `yaml:"port"`
-	Database    string          `yaml:"database"`
+	Engine      string           `yaml:"engine"`
+	Host        string           `yaml:"host"`
+	Port        int              `yaml:"port"`
+	Database    string           `yaml:"database"`
 	Credentials CredentialConfig `yaml:"credentials"`
-	SSLMode     string          `yaml:"ssl_mode,omitempty"`
+	SSLMode     string           `yaml:"ssl_mode,omitempty"`
 }
 
+// CredentialConfig defines how to obtain database credentials.
 type CredentialConfig struct {
 	Type        string `yaml:"type"`
 	UsernameEnv string `yaml:"username_env,omitempty"`
@@ -67,12 +77,15 @@ type CredentialConfig struct {
 	Password    string `yaml:"password,omitempty"`
 }
 
+// TableConfig defines a single table to archive within a rule.
 type TableConfig struct {
 	Name       string `yaml:"name"`
 	DateColumn string `yaml:"date_column"`
 	DaysOnline int    `yaml:"days_online"`
 }
 
+// Load loads configuration from the specified path or searches default locations.
+// If path is empty, searches: ./apr.yaml, ~/.apr/config.yaml, /etc/apr/config.yaml
 func Load(path string) (*Config, error) {
 	if path != "" {
 		return loadFromFile(path)
@@ -84,15 +97,11 @@ func Load(path string) (*Config, error) {
 	}
 
 	if home, err := os.UserHomeDir(); err == nil {
-		searchPaths = append(searchPaths,
-			filepath.Join(home, ".apr", "config.yaml"),
-			filepath.Join(home, ".apr", "config.yml"),
+		searchPaths = append(searchPaths, filepath.Join(home, ".apr", "config.yaml"), filepath.Join(home, ".apr", "config.yml"),
 		)
 	}
 
-	searchPaths = append(searchPaths,
-		"/etc/apr/config.yaml",
-		"/etc/apr/config.yml",
+	searchPaths = append(searchPaths, "/etc/apr/config.yaml", "/etc/apr/config.yml",
 	)
 
 	for _, p := range searchPaths {
@@ -119,9 +128,13 @@ func loadFromFile(path string) (*Config, error) {
 	return &cfg, nil
 }
 
+// applyDefaults sets default values for unset configuration fields.
+// History path precedence: config file > APR_HISTORY_PATH env var > ~/.apr/history.db > /var/lib/apr/history.db
 func (c *Config) applyDefaults() {
 	if c.History.Path == "" {
-		if home, err := os.UserHomeDir(); err == nil {
+		if envPath := os.Getenv("APR_HISTORY_PATH"); envPath != "" {
+			c.History.Path = filepath.Clean(envPath)
+		} else if home, err := os.UserHomeDir(); err == nil {
 			c.History.Path = filepath.Join(home, ".apr", "history.db")
 		} else {
 			c.History.Path = "/var/lib/apr/history.db"
@@ -138,6 +151,7 @@ func (c *Config) applyDefaults() {
 	}
 }
 
+// Validate checks the configuration for errors and required fields.
 func (c *Config) Validate() error {
 	if c.Storage.Type == "" {
 		return fmt.Errorf("storage.type is required")
@@ -193,6 +207,7 @@ func validateRule(rule Rule, index int) error {
 	if rule.Source.Engine == "" {
 		return fmt.Errorf("%s: source.engine is required", prefix)
 	}
+
 	switch rule.Source.Engine {
 	case "postgres", "mysql":
 		// ok
@@ -209,7 +224,6 @@ func validateRule(rule Rule, index int) error {
 	if rule.Source.Database == "" {
 		return fmt.Errorf("%s: source.database is required", prefix)
 	}
-
 	if rule.Source.Credentials.Type == "" {
 		return fmt.Errorf("%s: source.credentials.type is required", prefix)
 	}
@@ -238,6 +252,7 @@ func validateRule(rule Rule, index int) error {
 	return nil
 }
 
+// FindRule returns the rule with the specified name, or nil if not found.
 func (c *Config) FindRule(name string) *Rule {
 	for i := range c.Rules {
 		if c.Rules[i].Name == name {
