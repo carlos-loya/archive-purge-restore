@@ -174,7 +174,7 @@ func (c *Config) Validate() error {
 		}
 		if c.Storage.Filesystem.BasePath == "" {
 			return fmt.Errorf("storage.filesystem.base_path is required")
-		}
+	}
 	default:
 		return fmt.Errorf("unsupported storage type: %s (must be s3 or filesystem)", c.Storage.Type)
 	}
