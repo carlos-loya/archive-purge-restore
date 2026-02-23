@@ -206,6 +206,12 @@ func deleteCompositePK(ctx context.Context, tx *sql.Tx, table string, pkColumns 
 	const batchSize = 500
 	var total int64
 
+	quotedCols := make([]string, len(pkColumns))
+	for i, col := range pkColumns {
+		quotedCols[i] = quoteIdent(col)
+	}
+	colTuple := "(" + strings.Join(quotedCols, ", ") + ")"
+
 	for i := 0; i < len(pkValues); i += batchSize {
 		end := i + batchSize
 		if end > len(pkValues) {
@@ -213,21 +219,21 @@ func deleteCompositePK(ctx context.Context, tx *sql.Tx, table string, pkColumns 
 		}
 		batch := pkValues[i:end]
 
-		var conditions []string
+		var tuples []string
 		var args []any
 		argIdx := 1
 		for _, pk := range batch {
-			parts := make([]string, len(pkColumns))
-			for j, col := range pkColumns {
-				parts[j] = fmt.Sprintf("%s = $%d", quoteIdent(col), argIdx)
+			placeholders := make([]string, len(pkColumns))
+			for j := range pkColumns {
+				placeholders[j] = fmt.Sprintf("$%d", argIdx)
 				args = append(args, pk[j])
 				argIdx++
 			}
-			conditions = append(conditions, "("+strings.Join(parts, " AND ")+")")
+			tuples = append(tuples, "("+strings.Join(placeholders, ", ")+")")
 		}
 
-		query := fmt.Sprintf("DELETE FROM %s WHERE %s",
-			quoteIdent(table), strings.Join(conditions, " OR "))
+		query := fmt.Sprintf("DELETE FROM %s WHERE %s IN (%s)",
+			quoteIdent(table), colTuple, strings.Join(tuples, ", "))
 
 		result, err := tx.ExecContext(ctx, query, args...)
 		if err != nil {
