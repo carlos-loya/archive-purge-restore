@@ -233,9 +233,6 @@ func TestValidate(t *testing.T) {
 }
 
 func TestHistoryPathFromEnvVar(t *testing.T) {
-	// Unset any existing env var to ensure clean state
-	os.Unsetenv("APR_HISTORY_PATH")
-	
 	content := `
 storage:
   type: filesystem
@@ -300,6 +297,24 @@ history:
 		}
 	})
 	
+	t.Run("default path when env var is not set", func(t *testing.T) {
+		t.Setenv("APR_HISTORY_PATH", "")
+
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+
+		home, err := os.UserHomeDir()
+		if err != nil {
+			t.Skip("cannot determine home directory")
+		}
+		expected := filepath.Join(home, ".apr", "history.db")
+		if cfg.History.Path != expected {
+			t.Errorf("History.Path = %q, want default %q", cfg.History.Path, expected)
+		}
+	})
+
 	t.Run("env var cleaned with filepath.Clean", func(t *testing.T) {
 		// Set a messy path that needs cleaning
 		t.Setenv("APR_HISTORY_PATH", "/custom//path/../path/history.db")

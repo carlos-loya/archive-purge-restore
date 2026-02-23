@@ -120,11 +120,7 @@ func loadFromFile(path string) (*Config, error) {
 }
 
 func (c *Config) applyDefaults() {
-	// Apply history path with precedence:
-	// 1. Config file value (highest priority - already set)
-	// 2. APR_HISTORY_PATH environment variable
-	// 3. Default home directory path
-	// 4. System default path (lowest priority)
+	// Check APR_HISTORY_PATH env var before falling back to home dir
 	if c.History.Path == "" {
 		if envPath := os.Getenv("APR_HISTORY_PATH"); envPath != "" {
 			c.History.Path = filepath.Clean(envPath)
