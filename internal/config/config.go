@@ -131,6 +131,7 @@ func loadFromFile(path string) (*Config, error) {
 // applyDefaults sets default values for unset configuration fields.
 // History path precedence: config file > APR_HISTORY_PATH env var > ~/.apr/history.db > /var/lib/apr/history.db
 func (c *Config) applyDefaults() {
+	// Check APR_HISTORY_PATH env var before falling back to home dir
 	if c.History.Path == "" {
 		if envPath := os.Getenv("APR_HISTORY_PATH"); envPath != "" {
 			c.History.Path = filepath.Clean(envPath)
