@@ -3,7 +3,10 @@ package filesystem
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -160,5 +163,79 @@ func TestRename(t *testing.T) {
 	got, _ := io.ReadAll(rc)
 	if !bytes.Equal(got, data) {
 		t.Errorf("renamed file content = %q, want %q", got, data)
+	}
+}
+
+// errReader is an io.Reader that returns an error after reading n bytes.
+type errReader struct {
+	data []byte
+	pos  int
+	err  error
+}
+
+func (r *errReader) Read(p []byte) (int, error) {
+	if r.pos >= len(r.data) {
+		return 0, r.err
+	}
+	n := copy(p, r.data[r.pos:])
+	r.pos += n
+	if r.pos >= len(r.data) {
+		return n, r.err
+	}
+	return n, nil
+}
+
+func TestPutWriteErrorCleansUpFile(t *testing.T) {
+	dir := t.TempDir()
+	p, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	readErr := errors.New("simulated read failure")
+	reader := &errReader{data: []byte("partial"), err: readErr}
+
+	err = p.Put(ctx, "sub/fail.txt", reader)
+	if err == nil {
+		t.Fatal("Put() should have returned an error")
+	}
+	if !errors.Is(err, readErr) {
+		t.Errorf("Put() error = %v, want wrapped %v", err, readErr)
+	}
+
+	// The partial file should have been cleaned up.
+	path := filepath.Join(dir, "sub", "fail.txt")
+	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+		t.Errorf("partial file %s was not cleaned up after write error", path)
+	}
+}
+
+func TestPutNoDoubleClose(t *testing.T) {
+	dir := t.TempDir()
+	p, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	data := []byte("test content for close check")
+	if err := p.Put(ctx, "close-test.txt", bytes.NewReader(data)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify the file was written correctly (no double-close corruption).
+	rc, err := p.Get(ctx, "close-test.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rc.Close()
+
+	got, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, data) {
+		t.Errorf("Get() = %q, want %q", got, data)
 	}
 }

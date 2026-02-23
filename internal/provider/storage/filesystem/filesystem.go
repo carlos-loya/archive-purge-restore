@@ -38,12 +38,19 @@ func (p *Provider) Put(_ context.Context, key string, reader io.Reader) error {
 	if err != nil {
 		return fmt.Errorf("creating file %s: %w", key, err)
 	}
-	defer f.Close()
 
 	if _, err := io.Copy(f, reader); err != nil {
+		f.Close()
+		os.Remove(path)
 		return fmt.Errorf("writing file %s: %w", key, err)
 	}
-	return f.Close()
+
+	if err := f.Close(); err != nil {
+		os.Remove(path)
+		return fmt.Errorf("closing file %s: %w", key, err)
+	}
+
+	return nil
 }
 
 func (p *Provider) Get(_ context.Context, key string) (io.ReadCloser, error) {
