@@ -7,24 +7,26 @@ import (
 	"strings"
 	"time"
 
+	"github.com/carlos-loya/archive-purge-restore/internal/config"
 	"github.com/carlos-loya/archive-purge-restore/internal/provider/database"
 	_ "github.com/lib/pq"
 )
 
 // Provider implements database.Provider for PostgreSQL.
 type Provider struct {
-	dsn string
-	db  *sql.DB
+	dsn  string
+	pool config.PoolConfig
+	db   *sql.DB
 }
 
 // New creates a new PostgreSQL provider.
-func New(host string, port int, dbname, user, password, sslMode string) *Provider {
+func New(host string, port int, dbname, user, password, sslMode string, pool config.PoolConfig) *Provider {
 	if sslMode == "" {
 		sslMode = "prefer"
 	}
 	dsn := fmt.Sprintf("host=%s port=%d dbname=%s user=%s password=%s sslmode=%s",
 		host, port, dbname, user, password, sslMode)
-	return &Provider{dsn: dsn}
+	return &Provider{dsn: dsn, pool: pool}
 }
 
 // NewFromDSN creates a PostgreSQL provider from a DSN string.
@@ -40,6 +42,18 @@ func (p *Provider) Connect(ctx context.Context) error {
 	if err := db.PingContext(ctx); err != nil {
 		db.Close()
 		return fmt.Errorf("pinging postgres: %w", err)
+	}
+	if p.pool.MaxOpenConns != 0 {
+		db.SetMaxOpenConns(p.pool.MaxOpenConns)
+	}
+	if p.pool.MaxIdleConns != 0 {
+		db.SetMaxIdleConns(p.pool.MaxIdleConns)
+	}
+	if p.pool.ConnMaxLifetime != 0 {
+		db.SetConnMaxLifetime(p.pool.ConnMaxLifetime)
+	}
+	if p.pool.ConnMaxIdleTime != 0 {
+		db.SetConnMaxIdleTime(p.pool.ConnMaxIdleTime)
 	}
 	p.db = db
 	return nil

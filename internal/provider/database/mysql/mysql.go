@@ -7,21 +7,23 @@ import (
 	"strings"
 	"time"
 
+	"github.com/carlos-loya/archive-purge-restore/internal/config"
 	"github.com/carlos-loya/archive-purge-restore/internal/provider/database"
 	_ "github.com/go-sql-driver/mysql"
 )
 
 // Provider implements database.Provider for MySQL.
 type Provider struct {
-	dsn string
-	db  *sql.DB
+	dsn  string
+	pool config.PoolConfig
+	db   *sql.DB
 }
 
 // New creates a new MySQL provider.
-func New(host string, port int, dbname, user, password string) *Provider {
+func New(host string, port int, dbname, user, password string, pool config.PoolConfig) *Provider {
 	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?parseTime=true",
 		user, password, host, port, dbname)
-	return &Provider{dsn: dsn}
+	return &Provider{dsn: dsn, pool: pool}
 }
 
 // NewFromDSN creates a MySQL provider from a DSN string.
@@ -37,6 +39,18 @@ func (p *Provider) Connect(ctx context.Context) error {
 	if err := db.PingContext(ctx); err != nil {
 		db.Close()
 		return fmt.Errorf("pinging mysql: %w", err)
+	}
+	if p.pool.MaxOpenConns != 0 {
+		db.SetMaxOpenConns(p.pool.MaxOpenConns)
+	}
+	if p.pool.MaxIdleConns != 0 {
+		db.SetMaxIdleConns(p.pool.MaxIdleConns)
+	}
+	if p.pool.ConnMaxLifetime != 0 {
+		db.SetConnMaxLifetime(p.pool.ConnMaxLifetime)
+	}
+	if p.pool.ConnMaxIdleTime != 0 {
+		db.SetConnMaxIdleTime(p.pool.ConnMaxIdleTime)
 	}
 	p.db = db
 	return nil
