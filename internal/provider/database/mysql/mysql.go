@@ -266,7 +266,15 @@ func (p *Provider) RestoreRows(ctx context.Context, table string, columns []stri
 	for _, row := range rows {
 		args := make([]any, len(columns))
 		for i, col := range columns {
-			args[i] = row[col]
+			v := row[col]
+			// Parquet stores datetime values as RFC3339 strings. Parse them
+			// back to time.Time so the MySQL driver formats them correctly.
+			if s, ok := v.(string); ok {
+				if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+					v = t
+				}
+			}
+			args[i] = v
 		}
 		_, err := stmt.ExecContext(ctx, args...)
 		if err != nil {
