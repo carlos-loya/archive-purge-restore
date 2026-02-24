@@ -196,7 +196,7 @@ func TestPostgresArchiveAndRestore(t *testing.T) {
 	ctx := context.Background()
 
 	// Connect via provider.
-	pgProvider := postgres.New(pgHost, pgPort, pgDB, pgUser, pgPass, "disable")
+	pgProvider := postgres.New(pgHost, pgPort, pgDB, pgUser, pgPass, "disable", config.PoolConfig{})
 	if err := pgProvider.Connect(ctx); err != nil {
 		t.Fatalf("connecting postgres provider: %v", err)
 	}
@@ -268,7 +268,7 @@ func TestPostgresCompositePK(t *testing.T) {
 	resetPostgres(t)
 	ctx := context.Background()
 
-	pgProvider := postgres.New(pgHost, pgPort, pgDB, pgUser, pgPass, "disable")
+	pgProvider := postgres.New(pgHost, pgPort, pgDB, pgUser, pgPass, "disable", config.PoolConfig{})
 	if err := pgProvider.Connect(ctx); err != nil {
 		t.Fatalf("connecting postgres provider: %v", err)
 	}
@@ -326,7 +326,7 @@ func TestMySQLArchiveAndRestore(t *testing.T) {
 	resetMySQL(t)
 	ctx := context.Background()
 
-	myProvider := mysql.New(myHost, myPort, myDB, myUser, myPass)
+	myProvider := mysql.New(myHost, myPort, myDB, myUser, myPass, config.PoolConfig{})
 	if err := myProvider.Connect(ctx); err != nil {
 		t.Fatalf("connecting mysql provider: %v", err)
 	}
@@ -384,7 +384,7 @@ func TestMySQLCompositePK(t *testing.T) {
 	resetMySQL(t)
 	ctx := context.Background()
 
-	myProvider := mysql.New(myHost, myPort, myDB, myUser, myPass)
+	myProvider := mysql.New(myHost, myPort, myDB, myUser, myPass, config.PoolConfig{})
 	if err := myProvider.Connect(ctx); err != nil {
 		t.Fatalf("connecting mysql provider: %v", err)
 	}
@@ -442,7 +442,7 @@ func TestArchiveIsIdempotent(t *testing.T) {
 	resetPostgres(t)
 	ctx := context.Background()
 
-	pgProvider := postgres.New(pgHost, pgPort, pgDB, pgUser, pgPass, "disable")
+	pgProvider := postgres.New(pgHost, pgPort, pgDB, pgUser, pgPass, "disable", config.PoolConfig{})
 	if err := pgProvider.Connect(ctx); err != nil {
 		t.Fatalf("connecting postgres provider: %v", err)
 	}
@@ -492,7 +492,7 @@ func TestNullableRoundTrip(t *testing.T) {
 	resetPostgres(t)
 	ctx := context.Background()
 
-	pgProvider := postgres.New(pgHost, pgPort, pgDB, pgUser, pgPass, "disable")
+	pgProvider := postgres.New(pgHost, pgPort, pgDB, pgUser, pgPass, "disable", config.PoolConfig{})
 	if err := pgProvider.Connect(ctx); err != nil {
 		t.Fatalf("connecting postgres provider: %v", err)
 	}

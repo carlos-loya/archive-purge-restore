@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -66,6 +67,16 @@ type SourceConfig struct {
 	Database    string           `yaml:"database"`
 	Credentials CredentialConfig `yaml:"credentials"`
 	SSLMode     string           `yaml:"ssl_mode,omitempty"`
+	Pool        PoolConfig       `yaml:"pool,omitempty"`
+}
+
+// PoolConfig defines database connection pool settings.
+// Zero values mean the Go database/sql defaults are used.
+type PoolConfig struct {
+	MaxOpenConns    int           `yaml:"max_open_conns"`
+	MaxIdleConns    int           `yaml:"max_idle_conns"`
+	ConnMaxLifetime time.Duration `yaml:"conn_max_lifetime"`
+	ConnMaxIdleTime time.Duration `yaml:"conn_max_idle_time"`
 }
 
 // CredentialConfig defines how to obtain database credentials.

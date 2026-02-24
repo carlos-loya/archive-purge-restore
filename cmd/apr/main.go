@@ -74,9 +74,9 @@ func makeDBProvider(src config.SourceConfig) (database.Provider, error) {
 	user, pass := resolveCredentials(src.Credentials)
 	switch src.Engine {
 	case "postgres":
-		return dbpg.New(src.Host, src.Port, src.Database, user, pass, src.SSLMode), nil
+		return dbpg.New(src.Host, src.Port, src.Database, user, pass, src.SSLMode, src.Pool), nil
 	case "mysql":
-		return dbmysql.New(src.Host, src.Port, src.Database, user, pass), nil
+		return dbmysql.New(src.Host, src.Port, src.Database, user, pass, src.Pool), nil
 	default:
 		return nil, fmt.Errorf("unsupported engine: %s", src.Engine)
 	}
