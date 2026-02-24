@@ -66,10 +66,10 @@ func (a *Archiver) Archive(ctx context.Context, rule config.Rule, db database.Pr
 		cutoff := time.Now().AddDate(0, 0, -tbl.DaysOnline)
 		ta, err := a.archiveTable(ctx, runID, rule, tbl, db, cutoff)
 		if err != nil {
-			result.Error = fmt.Errorf("archiving table %s: %w", tbl.Name, err)
+			result.Error = fmt.Errorf("run %s: archiving table %s: %w", runID, tbl.Name, err)
 			result.EndTime = time.Now()
 			// Clean up any pending files.
-			a.cleanupPendingFiles(ctx, archives)
+			a.cleanupPendingFiles(ctx, runID, archives)
 			return result, result.Error
 		}
 		archives = append(archives, *ta)
@@ -88,7 +88,7 @@ func (a *Archiver) Archive(ctx context.Context, rule config.Rule, db database.Pr
 
 		deleted, err := db.DeleteRows(ctx, ta.table, ta.pkCols, ta.pkValues)
 		if err != nil {
-			result.Error = fmt.Errorf("deleting rows from %s: %w", ta.table, err)
+			result.Error = fmt.Errorf("run %s: deleting %d rows from %s: %w", runID, ta.rowCount, ta.table, err)
 			result.EndTime = time.Now()
 			return result, result.Error
 		}
@@ -122,7 +122,7 @@ func (a *Archiver) archiveTable(ctx context.Context, runID string, rule config.R
 
 	pkCols, err := db.InferPrimaryKey(ctx, tbl.Name)
 	if err != nil {
-		return nil, fmt.Errorf("inferring primary key: %w", err)
+		return nil, fmt.Errorf("table %s: inferring primary key: %w", tbl.Name, err)
 	}
 
 	ta := &tableArchive{
@@ -134,13 +134,13 @@ func (a *Archiver) archiveTable(ctx context.Context, runID string, rule config.R
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, fmt.Errorf("table %s, batch %d: %w", tbl.Name, batchNum, ctx.Err())
 		default:
 		}
 
 		iter, err := db.ExtractRows(ctx, tbl.Name, tbl.DateColumn, cutoff, rule.BatchSize)
 		if err != nil {
-			return nil, fmt.Errorf("extracting rows: %w", err)
+			return nil, fmt.Errorf("table %s, batch %d: extracting rows: %w", tbl.Name, batchNum, err)
 		}
 
 		var rows []database.Row
@@ -157,7 +157,7 @@ func (a *Archiver) archiveTable(ctx context.Context, runID string, rule config.R
 		}
 		if err := iter.Err(); err != nil {
 			iter.Close()
-			return nil, fmt.Errorf("iterating rows: %w", err)
+			return nil, fmt.Errorf("table %s, batch %d: iterating rows: %w", tbl.Name, batchNum, err)
 		}
 		iter.Close()
 
@@ -177,14 +177,14 @@ func (a *Archiver) archiveTable(ctx context.Context, runID string, rule config.R
 		// Write to Parquet.
 		data, err := format.WriteParquet(columns, rows)
 		if err != nil {
-			return nil, fmt.Errorf("writing parquet: %w", err)
+			return nil, fmt.Errorf("table %s, batch %d (%d rows): writing parquet: %w", tbl.Name, batchNum, len(rows), err)
 		}
 
 		key := archiveKey(rule.Source.Database, tbl.Name, cutoff, runID, batchNum)
 		pendingKey := key + ".pending"
 
 		if err := a.store.Put(ctx, pendingKey, bytes.NewReader(data)); err != nil {
-			return nil, fmt.Errorf("storing archive file: %w", err)
+			return nil, fmt.Errorf("table %s, batch %d (%d rows): storing archive file %s: %w", tbl.Name, batchNum, len(rows), pendingKey, err)
 		}
 
 		ta.files = append(ta.files, key)
@@ -203,12 +203,12 @@ func (a *Archiver) archiveTable(ctx context.Context, runID string, rule config.R
 	return ta, nil
 }
 
-func (a *Archiver) cleanupPendingFiles(ctx context.Context, archives []tableArchive) {
+func (a *Archiver) cleanupPendingFiles(ctx context.Context, runID string, archives []tableArchive) {
 	for _, ta := range archives {
 		for _, f := range ta.files {
 			pendingKey := f + ".pending"
 			if err := a.store.Delete(ctx, pendingKey); err != nil {
-				a.log.Printf("WARNING: failed to cleanup %s: %v", pendingKey, err)
+				a.log.Printf("[%s] WARNING: failed to cleanup %s: %v", runID, pendingKey, err)
 			}
 		}
 	}
