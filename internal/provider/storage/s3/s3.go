@@ -157,14 +157,25 @@ func (p *Provider) Rename(ctx context.Context, oldKey, newKey string) error {
 		return fmt.Errorf("copying %s to %s: %w", oldKey, newKey, err)
 	}
 
-	_, err = p.client.DeleteObject(ctx, &s3.DeleteObjectInput{
-		Bucket: aws.String(p.bucket),
-		Key:    aws.String(p.fullKey(oldKey)),
-	})
-	if err != nil {
-		return fmt.Errorf("deleting old key %s after copy: %w", oldKey, err)
+	// Retry delete to avoid orphaned copies if the first attempt fails.
+	const maxRetries = 3
+	var deleteErr error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		_, deleteErr = p.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+			Bucket: aws.String(p.bucket),
+			Key:    aws.String(p.fullKey(oldKey)),
+		})
+		if deleteErr == nil {
+			return nil
+		}
 	}
-	return nil
+
+	// Delete failed after retries — remove the copy to avoid orphans.
+	p.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(p.bucket),
+		Key:    aws.String(p.fullKey(newKey)),
+	})
+	return fmt.Errorf("deleting old key %s after copy (retried %d times): %w", oldKey, maxRetries, deleteErr)
 }
 
 // SetLifecyclePolicy configures S3 lifecycle rules on the bucket.
