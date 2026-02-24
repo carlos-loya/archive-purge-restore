@@ -331,10 +331,10 @@ func validateCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig()
 			if err != nil {
-				return fmt.Errorf("config validation failed: %w", err)
+				return fmt.Errorf("loading config: %w", err)
 			}
 			if err := cfg.Validate(); err != nil {
-				return fmt.Errorf("config validation failed: %w", err)
+				return fmt.Errorf("invalid config: %w", err)
 			}
 			fmt.Println("Configuration is valid.")
 			fmt.Printf("  Storage: %s\n", cfg.Storage.Type)
