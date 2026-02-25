@@ -167,6 +167,8 @@ func archiveCmd() *cobra.Command {
 				return fmt.Errorf("invalid config: %w", err)
 			}
 
+			dryRun, _ := cmd.Flags().GetBool("dry-run")
+
 			ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer cancel()
 
@@ -175,13 +177,45 @@ func archiveCmd() *cobra.Command {
 				return fmt.Errorf("creating storage: %w", err)
 			}
 
+			eng := engine.New(cfg, store)
+
+			if dryRun {
+				if len(args) == 1 {
+					rule := cfg.FindRule(args[0])
+					if rule == nil {
+						return fmt.Errorf("rule %q not found", args[0])
+					}
+					db, err := makeDBProvider(rule.Source)
+					if err != nil {
+						return err
+					}
+					if err := db.Connect(ctx); err != nil {
+						return err
+					}
+					defer db.Close()
+
+					result, err := eng.RunArchiveDryRun(ctx, rule.Name, db)
+					if err != nil {
+						return err
+					}
+					printArchiveDryRunResult(result)
+					return nil
+				}
+
+				results, err := eng.RunArchiveAllDryRun(ctx, func(src config.SourceConfig) (database.Provider, error) {
+					return makeDBProvider(src)
+				})
+				for _, r := range results {
+					printArchiveDryRunResult(r)
+				}
+				return err
+			}
+
 			hist, err := history.NewStore(cfg.History.Path)
 			if err != nil {
 				return fmt.Errorf("opening history: %w", err)
 			}
 			defer hist.Close()
-
-			eng := engine.New(cfg, store)
 
 			if len(args) == 1 {
 				rule := cfg.FindRule(args[0])
@@ -213,6 +247,7 @@ func archiveCmd() *cobra.Command {
 			return err
 		},
 	}
+	cmd.Flags().Bool("dry-run", false, "Preview what would be archived without making changes")
 	return cmd
 }
 
@@ -233,6 +268,7 @@ func restoreCmd() *cobra.Command {
 			table, _ := cmd.Flags().GetString("table")
 			date, _ := cmd.Flags().GetString("date")
 			runID, _ := cmd.Flags().GetString("run-id")
+			dryRun, _ := cmd.Flags().GetBool("dry-run")
 
 			if ruleName == "" {
 				return fmt.Errorf("--rule is required")
@@ -251,6 +287,19 @@ func restoreCmd() *cobra.Command {
 				return fmt.Errorf("creating storage: %w", err)
 			}
 
+			eng := engine.New(cfg, store)
+
+			if dryRun {
+				// For dry-run restore, we don't need a real DB connection since
+				// we only list and read files from storage.
+				result, restoreErr := eng.RunRestore(ctx, ruleName, table, date, runID, true, nil)
+				if restoreErr != nil {
+					return restoreErr
+				}
+				printRestoreDryRunResult(result)
+				return nil
+			}
+
 			hist, err := history.NewStore(cfg.History.Path)
 			if err != nil {
 				return fmt.Errorf("opening history: %w", err)
@@ -266,8 +315,7 @@ func restoreCmd() *cobra.Command {
 			}
 			defer db.Close()
 
-			eng := engine.New(cfg, store)
-			result, restoreErr := eng.RunRestore(ctx, ruleName, table, date, runID, db)
+			result, restoreErr := eng.RunRestore(ctx, ruleName, table, date, runID, false, db)
 			recordRestoreHistory(hist, result, restoreErr)
 			printRestoreResult(result)
 			return restoreErr
@@ -277,6 +325,7 @@ func restoreCmd() *cobra.Command {
 	cmd.Flags().String("table", "", "Table name to restore (optional, all tables if empty)")
 	cmd.Flags().String("date", "", "Date of archived data (YYYY-MM-DD)")
 	cmd.Flags().String("run-id", "", "Specific run ID to restore")
+	cmd.Flags().Bool("dry-run", false, "Preview what would be restored without making changes")
 	return cmd
 }
 
@@ -449,5 +498,31 @@ func printRestoreResult(r *engine.RestoreResult) {
 	}
 	if r.Error != nil {
 		fmt.Printf("  Error: %v\n", r.Error)
+	}
+}
+
+func printArchiveDryRunResult(r *engine.DryRunResult) {
+	if r == nil {
+		return
+	}
+	fmt.Println("DRY RUN — no changes will be made")
+	fmt.Println()
+	fmt.Printf("Rule: %s\n", r.Rule)
+	for _, t := range r.Tables {
+		fmt.Printf("  %s: %d rows older than %s would be archived\n",
+			t.Table, t.Count, t.Cutoff.Format("2006-01-02"))
+	}
+}
+
+func printRestoreDryRunResult(r *engine.RestoreResult) {
+	if r == nil {
+		return
+	}
+	fmt.Println("DRY RUN — no changes will be made")
+	fmt.Println()
+	fmt.Printf("Rule: %s\n", r.Rule)
+	for _, t := range r.Tables {
+		fmt.Printf("  %s: %d file(s), %d rows would be restored\n",
+			t.Table, len(t.Files), t.RowsRestored)
 	}
 }
