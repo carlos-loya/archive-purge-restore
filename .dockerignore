@@ -1,0 +1,7 @@
+.git
+.claude
+*.md
+!README.md
+LICENSE
+dev/
+integration/
