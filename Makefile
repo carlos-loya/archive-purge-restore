@@ -1,7 +1,7 @@
 MODULE := github.com/carlos-loya/archive-purge-restore
 BINARY := apr
 VERSION ?= dev
-LDFLAGS := -ldflags "-X main.version=$(VERSION)"
+LDFLAGS := -ldflags "-s -w -X main.version=$(VERSION)"
 
 .PHONY: build test clean lint dev-up dev-down dev-reset test-integration test-all
 

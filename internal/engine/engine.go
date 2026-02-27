@@ -41,6 +41,39 @@ func (e *Engine) RunArchive(ctx context.Context, ruleName string, db database.Pr
 	return e.archiver.Archive(ctx, *rule, db)
 }
 
+// RunArchiveDryRun simulates an archive run without making any changes.
+func (e *Engine) RunArchiveDryRun(ctx context.Context, ruleName string, db database.Provider) (*DryRunResult, error) {
+	rule := e.cfg.FindRule(ruleName)
+	if rule == nil {
+		return nil, fmt.Errorf("rule %q not found", ruleName)
+	}
+	return e.archiver.ArchiveDryRun(ctx, *rule, db)
+}
+
+// RunArchiveAllDryRun simulates an archive run for all rules without making any changes.
+func (e *Engine) RunArchiveAllDryRun(ctx context.Context, dbFactory func(config.SourceConfig) (database.Provider, error)) ([]*DryRunResult, error) {
+	var results []*DryRunResult
+	for _, rule := range e.cfg.Rules {
+		db, err := dbFactory(rule.Source)
+		if err != nil {
+			return results, fmt.Errorf("creating database provider for rule %s: %w", rule.Name, err)
+		}
+		if err := db.Connect(ctx); err != nil {
+			db.Close()
+			return results, fmt.Errorf("connecting to database for rule %s: %w", rule.Name, err)
+		}
+
+		result, err := e.archiver.ArchiveDryRun(ctx, rule, db)
+		db.Close()
+
+		results = append(results, result)
+		if err != nil {
+			return results, err
+		}
+	}
+	return results, nil
+}
+
 // RunArchiveAll executes the archive process for all rules.
 func (e *Engine) RunArchiveAll(ctx context.Context, dbFactory func(config.SourceConfig) (database.Provider, error)) ([]*RunResult, error) {
 	var results []*RunResult
@@ -66,17 +99,18 @@ func (e *Engine) RunArchiveAll(ctx context.Context, dbFactory func(config.Source
 }
 
 // RunRestore executes the restore process.
-func (e *Engine) RunRestore(ctx context.Context, ruleName, table, date, runID string, db database.Provider) (*RestoreResult, error) {
+func (e *Engine) RunRestore(ctx context.Context, ruleName, table, date, runID string, dryRun bool, db database.Provider) (*RestoreResult, error) {
 	rule := e.cfg.FindRule(ruleName)
 	if rule == nil {
 		return nil, fmt.Errorf("rule %q not found", ruleName)
 	}
 
 	opts := RestoreOptions{
-		Rule:     *rule,
-		Table:    table,
-		Date:     date,
-		RunID:    runID,
+		Rule:   *rule,
+		Table:  table,
+		Date:   date,
+		RunID:  runID,
+		DryRun: dryRun,
 	}
 
 	return e.restorer.Restore(ctx, opts, db)

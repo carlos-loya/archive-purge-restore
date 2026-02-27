@@ -15,10 +15,11 @@ import (
 
 // RestoreOptions specifies what to restore.
 type RestoreOptions struct {
-	Rule  config.Rule
-	Table string // specific table, or empty for all tables in rule
-	Date  string // YYYY-MM-DD, or empty for all dates
-	RunID string // specific run ID, or empty for all
+	Rule   config.Rule
+	Table  string // specific table, or empty for all tables in rule
+	Date   string // YYYY-MM-DD, or empty for all dates
+	RunID  string // specific run ID, or empty for all
+	DryRun bool   // if true, list files and count rows without inserting
 }
 
 // RestoreResult contains the result of a restore operation.
@@ -134,6 +135,13 @@ func (r *Restorer) restoreTable(ctx context.Context, opts RestoreOptions, tbl co
 		columns, rows, err := format.ReadParquet(data)
 		if err != nil {
 			return nil, fmt.Errorf("parsing parquet file %s: %w", obj.Key, err)
+		}
+
+		if opts.DryRun {
+			result.RowsRestored += int64(len(rows))
+			result.Files = append(result.Files, obj.Key)
+			r.log.Printf("[dry-run] found %d rows in %s", len(rows), obj.Key)
+			continue
 		}
 
 		colNames := make([]string, len(columns))

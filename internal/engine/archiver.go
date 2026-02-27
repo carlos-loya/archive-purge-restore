@@ -34,6 +34,19 @@ type RunResult struct {
 	Error     error
 }
 
+// DryRunTableResult contains the dry-run result for a single table.
+type DryRunTableResult struct {
+	Table  string
+	Count  int64
+	Cutoff time.Time
+}
+
+// DryRunResult contains the overall dry-run result.
+type DryRunResult struct {
+	Rule   string
+	Tables []DryRunTableResult
+}
+
 // Archiver performs archive operations.
 type Archiver struct {
 	store storage.Provider
@@ -114,6 +127,57 @@ func (a *Archiver) Archive(ctx context.Context, rule config.Rule, db database.Pr
 
 	result.EndTime = time.Now()
 	a.log.Printf("[%s] archive run completed in %v", runID, result.EndTime.Sub(result.StartTime))
+	return result, nil
+}
+
+// ArchiveDryRun simulates an archive run without writing files or deleting rows.
+// It counts rows that would be archived per table and returns a summary.
+func (a *Archiver) ArchiveDryRun(ctx context.Context, rule config.Rule, db database.Provider) (*DryRunResult, error) {
+	result := &DryRunResult{
+		Rule: rule.Name,
+	}
+
+	for _, tbl := range rule.Tables {
+		cutoff := time.Now().AddDate(0, 0, -tbl.DaysOnline)
+		var count int64
+
+		// Count rows by extracting them in batches without writing anything.
+		for {
+			select {
+			case <-ctx.Done():
+				return nil, fmt.Errorf("dry-run table %s: %w", tbl.Name, ctx.Err())
+			default:
+			}
+
+			iter, err := db.ExtractRows(ctx, tbl.Name, tbl.DateColumn, cutoff, rule.BatchSize)
+			if err != nil {
+				return nil, fmt.Errorf("dry-run table %s: extracting rows: %w", tbl.Name, err)
+			}
+
+			batchCount := 0
+			for iter.Next() {
+				batchCount++
+			}
+			if err := iter.Err(); err != nil {
+				iter.Close()
+				return nil, fmt.Errorf("dry-run table %s: iterating rows: %w", tbl.Name, err)
+			}
+			iter.Close()
+
+			count += int64(batchCount)
+
+			if batchCount == 0 || batchCount < rule.BatchSize {
+				break
+			}
+		}
+
+		result.Tables = append(result.Tables, DryRunTableResult{
+			Table:  tbl.Name,
+			Count:  count,
+			Cutoff: cutoff,
+		})
+	}
+
 	return result, nil
 }
 
