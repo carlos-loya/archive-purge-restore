@@ -3,7 +3,7 @@ package engine
 import (
 	"bytes"
 	"context"
-	"log"
+	"log/slog"
 	"os"
 	"testing"
 
@@ -48,7 +48,7 @@ func TestRestoreBasic(t *testing.T) {
 		pkCols: []string{"id"},
 	}
 
-	logger := log.New(os.Stderr, "[test] ", log.LstdFlags)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	restorer := NewRestorer(store, logger)
 
 	rule := config.Rule{
@@ -112,7 +112,7 @@ func TestRestoreByRunID(t *testing.T) {
 	store.Put(ctx, "testdb/items/2025-01-01/run22222_000.parquet", bytes.NewReader(data2))
 
 	db := &mockDB{schema: columns, pkCols: []string{"id"}}
-	logger := log.New(os.Stderr, "[test] ", log.LstdFlags)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	restorer := NewRestorer(store, logger)
 
 	rule := config.Rule{
@@ -143,7 +143,7 @@ func TestRestoreByRunID(t *testing.T) {
 func TestRestoreTableNotFound(t *testing.T) {
 	dir := t.TempDir()
 	store, _ := filesystem.New(dir)
-	logger := log.New(os.Stderr, "[test] ", log.LstdFlags)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	restorer := NewRestorer(store, logger)
 
 	rule := config.Rule{
@@ -200,7 +200,7 @@ func TestRestoreDryRun(t *testing.T) {
 		pkCols: []string{"id"},
 	}
 
-	logger := log.New(os.Stderr, "[test] ", log.LstdFlags)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	restorer := NewRestorer(store, logger)
 
 	rule := config.Rule{
@@ -264,7 +264,7 @@ func TestRestoreDryRunMultipleFiles(t *testing.T) {
 	store.Put(ctx, "testdb/items/2025-01-01/run11111_001.parquet", bytes.NewReader(data2))
 
 	db := &mockDB{schema: columns, pkCols: []string{"id"}}
-	logger := log.New(os.Stderr, "[test] ", log.LstdFlags)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	restorer := NewRestorer(store, logger)
 
 	rule := config.Rule{
@@ -326,7 +326,7 @@ func TestRestoreDryRunNilDB(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	logger := log.New(os.Stderr, "[test] ", log.LstdFlags)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	restorer := NewRestorer(store, logger)
 
 	rule := config.Rule{

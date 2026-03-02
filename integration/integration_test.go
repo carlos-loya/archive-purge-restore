@@ -6,7 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"testing"
 
@@ -187,8 +187,8 @@ func countRows(t *testing.T, db *sql.DB, table string) int {
 	return n
 }
 
-func newLogger() *log.Logger {
-	return log.New(os.Stderr, "[integration] ", log.LstdFlags)
+func newLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(os.Stderr, nil))
 }
 
 func TestPostgresArchiveAndRestore(t *testing.T) {

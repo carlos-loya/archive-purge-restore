@@ -2,7 +2,7 @@ package engine
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"os"
 	"testing"
 	"time"
@@ -79,7 +79,7 @@ func TestArchiveBasic(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	logger := log.New(os.Stderr, "[test] ", log.LstdFlags)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	archiver := NewArchiver(store, logger)
 
 	db := &mockDB{
@@ -154,7 +154,7 @@ func TestArchiveNoRows(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	logger := log.New(os.Stderr, "[test] ", log.LstdFlags)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	archiver := NewArchiver(store, logger)
 
 	db := &mockDB{
@@ -191,7 +191,7 @@ func TestArchiveDryRun(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	logger := log.New(os.Stderr, "[test] ", log.LstdFlags)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	archiver := NewArchiver(store, logger)
 
 	db := &mockDB{
@@ -263,7 +263,7 @@ func TestArchiveDryRunNoRows(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	logger := log.New(os.Stderr, "[test] ", log.LstdFlags)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	archiver := NewArchiver(store, logger)
 
 	db := &mockDB{
@@ -300,7 +300,7 @@ func TestArchiveDryRunMultipleTables(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	logger := log.New(os.Stderr, "[test] ", log.LstdFlags)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	archiver := NewArchiver(store, logger)
 
 	db := &mockDB{

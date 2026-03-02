@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -50,13 +50,13 @@ type DryRunResult struct {
 // Archiver performs archive operations.
 type Archiver struct {
 	store storage.Provider
-	log   *log.Logger
+	log   *slog.Logger
 }
 
 // NewArchiver creates a new Archiver.
-func NewArchiver(store storage.Provider, logger *log.Logger) *Archiver {
+func NewArchiver(store storage.Provider, logger *slog.Logger) *Archiver {
 	if logger == nil {
-		logger = log.Default()
+		logger = slog.Default()
 	}
 	return &Archiver{store: store, log: logger}
 }
@@ -70,7 +70,7 @@ func (a *Archiver) Archive(ctx context.Context, rule config.Rule, db database.Pr
 		StartTime: time.Now(),
 	}
 
-	a.log.Printf("[%s] starting archive run for rule %q", runID, rule.Name)
+	a.log.Info("starting archive run", "run_id", runID, "rule", rule.Name)
 
 	// Phase 1: Extract and archive all tables.
 	var archives []tableArchive
@@ -106,11 +106,11 @@ func (a *Archiver) Archive(ctx context.Context, rule config.Rule, db database.Pr
 		}
 
 		result.Tables[i].RowsDeleted = deleted
-		a.log.Printf("[%s] deleted %d rows from %s", runID, deleted, ta.table)
+		a.log.Info("deleted rows", "run_id", runID, "table", ta.table, "rows", deleted)
 
 		if deleted != ta.rowCount {
-			a.log.Printf("[%s] WARNING: deleted %d rows but archived %d from %s",
-				runID, deleted, ta.rowCount, ta.table)
+			a.log.Warn("deleted row count mismatch",
+				"run_id", runID, "table", ta.table, "deleted", deleted, "archived", ta.rowCount)
 		}
 	}
 
@@ -119,13 +119,13 @@ func (a *Archiver) Archive(ctx context.Context, rule config.Rule, db database.Pr
 		for _, f := range ta.files {
 			pendingKey := f + ".pending"
 			if err := a.store.Rename(ctx, pendingKey, f); err != nil {
-				a.log.Printf("[%s] WARNING: failed to finalize %s: %v", runID, f, err)
+				a.log.Warn("failed to finalize file", "run_id", runID, "file", f, "error", err)
 			}
 		}
 	}
 
 	result.EndTime = time.Now()
-	a.log.Printf("[%s] archive run completed in %v", runID, result.EndTime.Sub(result.StartTime))
+	a.log.Info("archive run completed", "run_id", runID, "duration", result.EndTime.Sub(result.StartTime))
 	return result, nil
 }
 
@@ -181,7 +181,7 @@ func (a *Archiver) ArchiveDryRun(ctx context.Context, rule config.Rule, db datab
 }
 
 func (a *Archiver) archiveTable(ctx context.Context, runID string, rule config.Rule, tbl config.TableConfig, db database.Provider, cutoff time.Time) (*tableArchive, error) {
-	a.log.Printf("[%s] archiving table %s (cutoff: %s)", runID, tbl.Name, cutoff.Format("2006-01-02"))
+	a.log.Info("archiving table", "run_id", runID, "table", tbl.Name, "cutoff", cutoff.Format("2006-01-02"))
 
 	pkCols, err := db.InferPrimaryKey(ctx, tbl.Name)
 	if err != nil {
@@ -254,15 +254,15 @@ func (a *Archiver) archiveTable(ctx context.Context, runID string, rule config.R
 		ta.rowCount += int64(len(rows))
 		batchNum++
 
-		a.log.Printf("[%s] archived batch %d: %d rows from %s", runID, batchNum, len(rows), tbl.Name)
+		a.log.Info("archived batch", "run_id", runID, "batch", batchNum, "rows", len(rows), "table", tbl.Name)
 
 		if len(rows) < rule.BatchSize {
 			break
 		}
 	}
 
-	a.log.Printf("[%s] table %s: %d total rows archived in %d batches",
-		runID, tbl.Name, ta.rowCount, batchNum)
+	a.log.Info("table archive complete",
+		"run_id", runID, "table", tbl.Name, "total_rows", ta.rowCount, "batches", batchNum)
 	return ta, nil
 }
 
@@ -271,7 +271,7 @@ func (a *Archiver) cleanupPendingFiles(ctx context.Context, runID string, archiv
 		for _, f := range ta.files {
 			pendingKey := f + ".pending"
 			if err := a.store.Delete(ctx, pendingKey); err != nil {
-				a.log.Printf("[%s] WARNING: failed to cleanup %s: %v", runID, pendingKey, err)
+				a.log.Warn("failed to cleanup pending file", "run_id", runID, "file", pendingKey, "error", err)
 			}
 		}
 	}

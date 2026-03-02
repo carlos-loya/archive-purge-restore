@@ -2,7 +2,7 @@ package scheduler
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"os"
 	"sync/atomic"
 	"testing"
@@ -12,7 +12,7 @@ import (
 )
 
 func TestSchedulerAddAndRun(t *testing.T) {
-	logger := log.New(os.Stderr, "[test] ", log.LstdFlags)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	s := NewStandard(logger)
 
 	var called atomic.Int32
@@ -34,7 +34,7 @@ func TestSchedulerAddAndRun(t *testing.T) {
 }
 
 func TestSchedulerInvalidSchedule(t *testing.T) {
-	logger := log.New(os.Stderr, "[test] ", log.LstdFlags)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	s := NewStandard(logger)
 
 	rule := config.Rule{
@@ -51,7 +51,7 @@ func TestSchedulerInvalidSchedule(t *testing.T) {
 }
 
 func TestSchedulerEmptySchedule(t *testing.T) {
-	logger := log.New(os.Stderr, "[test] ", log.LstdFlags)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	s := NewStandard(logger)
 
 	rule := config.Rule{
@@ -67,7 +67,7 @@ func TestSchedulerEmptySchedule(t *testing.T) {
 }
 
 func TestSchedulerStartStop(t *testing.T) {
-	logger := log.New(os.Stderr, "[test] ", log.LstdFlags)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	s := NewStandard(logger)
 
 	ctx, cancel := context.WithCancel(context.Background())

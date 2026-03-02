@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strings"
@@ -25,9 +25,11 @@ import (
 )
 
 var (
-	version = "dev"
-	cfgFile string
-	rootCmd *cobra.Command
+	version   = "dev"
+	cfgFile   string
+	logFormat string
+	logLevel  string
+	rootCmd   *cobra.Command
 )
 
 func init() {
@@ -40,6 +42,8 @@ from the source database, and can restore them on demand.`,
 	}
 
 	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "", "config file (default: ./apr.yaml, ~/.apr/config.yaml, /etc/apr/config.yaml)")
+	rootCmd.PersistentFlags().StringVar(&logFormat, "log-format", "text", "log output format (text|json)")
+	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "log level (debug|info|warn|error)")
 
 	rootCmd.AddCommand(daemonCmd())
 	rootCmd.AddCommand(archiveCmd())
@@ -47,6 +51,32 @@ from the source database, and can restore them on demand.`,
 	rootCmd.AddCommand(historyCmd())
 	rootCmd.AddCommand(validateCmd())
 	rootCmd.AddCommand(versionCmd())
+}
+
+func buildLogger() *slog.Logger {
+	var level slog.Level
+	switch strings.ToLower(logLevel) {
+	case "debug":
+		level = slog.LevelDebug
+	case "warn":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	default:
+		level = slog.LevelInfo
+	}
+
+	opts := &slog.HandlerOptions{Level: level}
+
+	var handler slog.Handler
+	switch strings.ToLower(logFormat) {
+	case "json":
+		handler = slog.NewJSONHandler(os.Stderr, opts)
+	default:
+		handler = slog.NewTextHandler(os.Stderr, opts)
+	}
+
+	return slog.New(handler)
 }
 
 func main() {
@@ -121,9 +151,9 @@ func daemonCmd() *cobra.Command {
 			}
 			defer hist.Close()
 
-			eng := engine.New(cfg, store)
-			logger := log.New(os.Stderr, "[apr] ", log.LstdFlags)
-			sched := scheduler.NewStandard(logger)
+			logger := buildLogger()
+			eng := engine.New(cfg, store, logger)
+			sched := scheduler.NewStandard(logger.With("component", "scheduler"))
 
 			for _, rule := range cfg.Rules {
 				ruleCopy := rule
@@ -177,7 +207,7 @@ func archiveCmd() *cobra.Command {
 				return fmt.Errorf("creating storage: %w", err)
 			}
 
-			eng := engine.New(cfg, store)
+			eng := engine.New(cfg, store, buildLogger())
 
 			if dryRun {
 				if len(args) == 1 {
@@ -287,7 +317,7 @@ func restoreCmd() *cobra.Command {
 				return fmt.Errorf("creating storage: %w", err)
 			}
 
-			eng := engine.New(cfg, store)
+			eng := engine.New(cfg, store, buildLogger())
 
 			if dryRun {
 				// For dry-run restore, we don't need a real DB connection since
