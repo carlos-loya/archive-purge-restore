@@ -76,8 +76,7 @@ func (a *Archiver) Archive(ctx context.Context, rule config.Rule, db database.Pr
 	var archives []tableArchive
 
 	for _, tbl := range rule.Tables {
-		cutoff := time.Now().AddDate(0, 0, -tbl.DaysOnline)
-		ta, err := a.archiveTable(ctx, runID, rule, tbl, db, cutoff)
+		ta, err := a.archiveTable(ctx, runID, rule, tbl, db, cutoff(tbl.DaysOnline))
 		if err != nil {
 			result.Error = fmt.Errorf("run %s: archiving table %s: %w", runID, tbl.Name, err)
 			result.EndTime = time.Now()
@@ -138,7 +137,7 @@ func (a *Archiver) ArchiveDryRun(ctx context.Context, rule config.Rule, db datab
 	}
 
 	for _, tbl := range rule.Tables {
-		cutoff := time.Now().AddDate(0, 0, -tbl.DaysOnline)
+		c := cutoff(tbl.DaysOnline)
 		var count int64
 
 		// Count rows by extracting them in batches without writing anything.
@@ -149,7 +148,7 @@ func (a *Archiver) ArchiveDryRun(ctx context.Context, rule config.Rule, db datab
 			default:
 			}
 
-			iter, err := db.ExtractRows(ctx, tbl.Name, tbl.DateColumn, cutoff, rule.BatchSize)
+			iter, err := db.ExtractRows(ctx, tbl.Name, tbl.DateColumn, c, rule.BatchSize)
 			if err != nil {
 				return nil, fmt.Errorf("dry-run table %s: extracting rows: %w", tbl.Name, err)
 			}
@@ -174,7 +173,7 @@ func (a *Archiver) ArchiveDryRun(ctx context.Context, rule config.Rule, db datab
 		result.Tables = append(result.Tables, DryRunTableResult{
 			Table:  tbl.Name,
 			Count:  count,
-			Cutoff: cutoff,
+			Cutoff: c,
 		})
 	}
 
@@ -293,6 +292,10 @@ func archiveKey(database, table string, cutoff time.Time, runID string, batch in
 		cutoff.Format("2006-01-02"),
 		runID,
 		batch)
+}
+
+func cutoff(daysOnline int) time.Time {
+	return time.Now().AddDate(0, 0, -daysOnline)
 }
 
 func sanitize(s string) string {

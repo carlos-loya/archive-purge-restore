@@ -19,7 +19,8 @@ type RestoreOptions struct {
 	Table  string // specific table, or empty for all tables in rule
 	Date   string // YYYY-MM-DD, or empty for all dates
 	RunID  string // specific run ID, or empty for all
-	DryRun bool   // if true, list files and count rows without inserting
+
+	DryRun bool // if true, list files and count rows without inserting
 }
 
 // RestoreResult contains the result of a restore operation.
