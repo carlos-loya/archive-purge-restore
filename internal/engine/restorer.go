@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/carlos-loya/archive-purge-restore/internal/config"
@@ -19,7 +19,8 @@ type RestoreOptions struct {
 	Table  string // specific table, or empty for all tables in rule
 	Date   string // YYYY-MM-DD, or empty for all dates
 	RunID  string // specific run ID, or empty for all
-	DryRun bool   // if true, list files and count rows without inserting
+
+	DryRun bool // if true, list files and count rows without inserting
 }
 
 // RestoreResult contains the result of a restore operation.
@@ -42,13 +43,13 @@ type RestoreTableResult struct {
 // Restorer performs restore operations.
 type Restorer struct {
 	store storage.Provider
-	log   *log.Logger
+	log   *slog.Logger
 }
 
 // NewRestorer creates a new Restorer.
-func NewRestorer(store storage.Provider, logger *log.Logger) *Restorer {
+func NewRestorer(store storage.Provider, logger *slog.Logger) *Restorer {
 	if logger == nil {
-		logger = log.Default()
+		logger = slog.Default()
 	}
 	return &Restorer{store: store, log: logger}
 }
@@ -85,7 +86,7 @@ func (r *Restorer) Restore(ctx context.Context, opts RestoreOptions, db database
 	}
 
 	result.EndTime = time.Now()
-	r.log.Printf("restore completed in %v", result.EndTime.Sub(result.StartTime))
+	r.log.Info("restore completed", "rule", opts.Rule.Name, "duration", result.EndTime.Sub(result.StartTime))
 	return result, nil
 }
 
@@ -95,7 +96,7 @@ func (r *Restorer) restoreTable(ctx context.Context, opts RestoreOptions, tbl co
 		prefix += opts.Date + "/"
 	}
 
-	r.log.Printf("searching for archive files with prefix %q", prefix)
+	r.log.Info("searching for archive files", "prefix", prefix)
 
 	objects, err := r.store.List(ctx, prefix)
 	if err != nil {
@@ -140,7 +141,7 @@ func (r *Restorer) restoreTable(ctx context.Context, opts RestoreOptions, tbl co
 		if opts.DryRun {
 			result.RowsRestored += int64(len(rows))
 			result.Files = append(result.Files, obj.Key)
-			r.log.Printf("[dry-run] found %d rows in %s", len(rows), obj.Key)
+			r.log.Info("dry-run: found rows", "file", obj.Key, "rows", len(rows))
 			continue
 		}
 
@@ -156,7 +157,7 @@ func (r *Restorer) restoreTable(ctx context.Context, opts RestoreOptions, tbl co
 
 		result.RowsRestored += inserted
 		result.Files = append(result.Files, obj.Key)
-		r.log.Printf("restored %d rows from %s", inserted, obj.Key)
+		r.log.Info("restored rows", "file", obj.Key, "rows", inserted)
 	}
 
 	return result, nil

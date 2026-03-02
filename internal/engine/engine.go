@@ -3,8 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
-	"log"
-	"os"
+	"log/slog"
 
 	"github.com/carlos-loya/archive-purge-restore/internal/config"
 	"github.com/carlos-loya/archive-purge-restore/internal/provider/database"
@@ -17,12 +16,14 @@ type Engine struct {
 	store    storage.Provider
 	archiver *Archiver
 	restorer *Restorer
-	log      *log.Logger
+	log      *slog.Logger
 }
 
 // New creates a new Engine.
-func New(cfg *config.Config, store storage.Provider) *Engine {
-	logger := log.New(os.Stderr, "[apr] ", log.LstdFlags)
+func New(cfg *config.Config, store storage.Provider, logger *slog.Logger) *Engine {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &Engine{
 		cfg:      cfg,
 		store:    store,
