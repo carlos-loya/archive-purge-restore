@@ -10,12 +10,13 @@ import (
 	"github.com/carlos-loya/archive-purge-restore/internal/provider/storage"
 )
 
-// Engine orchestrates archive and restore operations.
+// Engine orchestrates archive, restore, and verify operations.
 type Engine struct {
 	cfg      *config.Config
 	store    storage.Provider
 	archiver *Archiver
 	restorer *Restorer
+	verifier *Verifier
 	log      *slog.Logger
 }
 
@@ -29,6 +30,7 @@ func New(cfg *config.Config, store storage.Provider, logger *slog.Logger) *Engin
 		store:    store,
 		archiver: NewArchiver(store, logger),
 		restorer: NewRestorer(store, logger),
+		verifier: NewVerifier(store, logger),
 		log:      logger,
 	}
 }
@@ -97,6 +99,23 @@ func (e *Engine) RunArchiveAll(ctx context.Context, dbFactory func(config.Source
 		}
 	}
 	return results, nil
+}
+
+// RunVerify checks the integrity of archived Parquet files for a rule.
+func (e *Engine) RunVerify(ctx context.Context, ruleName, table, date, runID string) (*VerifyResult, error) {
+	rule := e.cfg.FindRule(ruleName)
+	if rule == nil {
+		return nil, fmt.Errorf("rule %q not found", ruleName)
+	}
+
+	opts := VerifyOptions{
+		Rule:  *rule,
+		Table: table,
+		Date:  date,
+		RunID: runID,
+	}
+
+	return e.verifier.Verify(ctx, opts)
 }
 
 // RunRestore executes the restore process.

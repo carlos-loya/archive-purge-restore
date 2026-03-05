@@ -48,6 +48,7 @@ from the source database, and can restore them on demand.`,
 	rootCmd.AddCommand(daemonCmd())
 	rootCmd.AddCommand(archiveCmd())
 	rootCmd.AddCommand(restoreCmd())
+	rootCmd.AddCommand(verifyCmd())
 	rootCmd.AddCommand(historyCmd())
 	rootCmd.AddCommand(validateCmd())
 	rootCmd.AddCommand(versionCmd())
@@ -359,6 +360,64 @@ func restoreCmd() *cobra.Command {
 	return cmd
 }
 
+func verifyCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "verify",
+		Short: "Verify integrity of archived Parquet files",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadConfig()
+			if err != nil {
+				return fmt.Errorf("loading config: %w", err)
+			}
+			if err := cfg.Validate(); err != nil {
+				return fmt.Errorf("invalid config: %w", err)
+			}
+
+			ruleName, _ := cmd.Flags().GetString("rule")
+			table, _ := cmd.Flags().GetString("table")
+			date, _ := cmd.Flags().GetString("date")
+			runID, _ := cmd.Flags().GetString("run-id")
+
+			if ruleName == "" {
+				return fmt.Errorf("--rule is required")
+			}
+
+			ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+			defer cancel()
+
+			store, err := makeStorage(ctx, cfg.Storage)
+			if err != nil {
+				return fmt.Errorf("creating storage: %w", err)
+			}
+
+			eng := engine.New(cfg, store, buildLogger())
+
+			fmt.Printf("Verifying archives for rule %q...\n", ruleName)
+
+			result, verifyErr := eng.RunVerify(ctx, ruleName, table, date, runID)
+			if verifyErr != nil {
+				return verifyErr
+			}
+
+			printVerifyResult(result)
+
+			// Best-effort history comparison.
+			hist, err := history.NewStore(cfg.History.Path)
+			if err == nil {
+				defer hist.Close()
+				printHistoryComparison(hist, result)
+			}
+
+			return nil
+		},
+	}
+	cmd.Flags().String("rule", "", "Rule name to verify (required)")
+	cmd.Flags().String("table", "", "Table name to verify (optional, all tables if empty)")
+	cmd.Flags().String("date", "", "Date of archived data (YYYY-MM-DD)")
+	cmd.Flags().String("run-id", "", "Specific run ID to verify")
+	return cmd
+}
+
 func historyCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "history",
@@ -555,4 +614,136 @@ func printRestoreDryRunResult(r *engine.RestoreResult) {
 		fmt.Printf("  %s: %d file(s), %d rows would be restored\n",
 			t.Table, len(t.Files), t.RowsRestored)
 	}
+}
+
+func printVerifyResult(r *engine.VerifyResult) {
+	if r == nil {
+		return
+	}
+
+	var okCount, corruptCount int
+	for _, t := range r.Tables {
+		for _, f := range t.Files {
+			switch f.Status {
+			case "OK":
+				okCount++
+				fmt.Printf("  %s: OK (%s rows)\n", f.Key, formatCount(f.RowCount))
+			case "CORRUPT":
+				corruptCount++
+				errMsg := "unknown error"
+				if f.Error != nil {
+					errMsg = f.Error.Error()
+				}
+				fmt.Printf("  %s: CORRUPT (%s)\n", f.Key, errMsg)
+			}
+		}
+	}
+
+	fmt.Println()
+	fmt.Printf("Verified: %d file(s) OK, %d file(s) CORRUPT\n", okCount, corruptCount)
+}
+
+func printHistoryComparison(hist *history.Store, result *engine.VerifyResult) {
+	events, err := hist.List(result.Rule, 1000)
+	if err != nil || len(events) == 0 {
+		return
+	}
+
+	// Build a map of run_id+table → expected row count from archive events.
+	type runTable struct {
+		RunID string
+		Table string
+	}
+	expected := make(map[runTable]int64)
+	for _, e := range events {
+		if e.EventType != history.EventArchive || e.Status != "success" {
+			continue
+		}
+		key := runTable{RunID: e.RunID, Table: e.Table}
+		expected[key] += e.RowCount
+	}
+
+	if len(expected) == 0 {
+		return
+	}
+
+	// Build a map of run_id+table → actual row count from verify results.
+	// Extract run IDs from file keys (the segment before _NNN.parquet).
+	actual := make(map[runTable]int)
+	for _, t := range result.Tables {
+		for _, f := range t.Files {
+			rid := extractRunID(f.Key)
+			if rid == "" {
+				continue
+			}
+			key := runTable{RunID: rid, Table: t.Table}
+			if f.Status == "OK" {
+				actual[key] += f.RowCount
+			}
+		}
+	}
+
+	// Only print if there are matches to compare.
+	var printed bool
+	for key, exp := range expected {
+		act, found := actual[key]
+		if !found {
+			continue
+		}
+		if !printed {
+			fmt.Println()
+			fmt.Println("History comparison:")
+			printed = true
+		}
+		if int64(act) == exp {
+			fmt.Printf("  Run %s, table %s: expected %s rows, found %s \u2713\n",
+				key.RunID, key.Table, formatCount(int(exp)), formatCount(act))
+		} else {
+			fmt.Printf("  Run %s, table %s: expected %s rows, found %s\n",
+				key.RunID, key.Table, formatCount(int(exp)), formatCount(act))
+		}
+	}
+}
+
+// extractRunID pulls the run ID from a parquet file key like "db/table/date/runid_000.parquet".
+func extractRunID(key string) string {
+	// Find the last slash to get the filename.
+	lastSlash := -1
+	for i := len(key) - 1; i >= 0; i-- {
+		if key[i] == '/' {
+			lastSlash = i
+			break
+		}
+	}
+	filename := key[lastSlash+1:]
+
+	// Run ID is everything before the first underscore.
+	for i := 0; i < len(filename); i++ {
+		if filename[i] == '_' {
+			return filename[:i]
+		}
+	}
+	return ""
+}
+
+func formatCount(n int) string {
+	if n < 1000 {
+		return fmt.Sprintf("%d", n)
+	}
+	return formatCountWithCommas(n)
+}
+
+func formatCountWithCommas(n int) string {
+	s := fmt.Sprintf("%d", n)
+	if len(s) <= 3 {
+		return s
+	}
+	var result []byte
+	for i, c := range s {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			result = append(result, ',')
+		}
+		result = append(result, byte(c))
+	}
+	return string(result)
 }
