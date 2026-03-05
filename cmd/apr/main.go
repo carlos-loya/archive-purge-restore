@@ -19,6 +19,7 @@ import (
 	dbpg "github.com/carlos-loya/archive-purge-restore/internal/provider/database/postgres"
 	"github.com/carlos-loya/archive-purge-restore/internal/provider/storage"
 	"github.com/carlos-loya/archive-purge-restore/internal/provider/storage/filesystem"
+	r2store "github.com/carlos-loya/archive-purge-restore/internal/provider/storage/r2"
 	s3store "github.com/carlos-loya/archive-purge-restore/internal/provider/storage/s3"
 	"github.com/carlos-loya/archive-purge-restore/internal/scheduler"
 	"github.com/spf13/cobra"
@@ -96,6 +97,8 @@ func makeStorage(ctx context.Context, cfg config.StorageConfig) (storage.Provide
 		return filesystem.New(cfg.Filesystem.BasePath)
 	case "s3":
 		return s3store.New(ctx, cfg.S3.Bucket, cfg.S3.Region, cfg.S3.Prefix, cfg.S3.Endpoint)
+	case "r2":
+		return r2store.New(ctx, cfg.R2.AccountID, cfg.R2.Bucket, cfg.R2.Region, cfg.R2.Prefix)
 	default:
 		return nil, fmt.Errorf("unsupported storage type: %s", cfg.Type)
 	}

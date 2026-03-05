@@ -22,6 +22,7 @@ type Config struct {
 type StorageConfig struct {
 	Type       string          `yaml:"type"`
 	S3         *S3Config       `yaml:"s3,omitempty"`
+	R2         *R2Config       `yaml:"r2,omitempty"`
 	Filesystem *FSConfig        `yaml:"filesystem,omitempty"`
 	Lifecycle  LifecycleConfig `yaml:"lifecycle"`
 }
@@ -32,6 +33,15 @@ type S3Config struct {
 	Region   string `yaml:"region"`
 	Prefix   string `yaml:"prefix"`
 	Endpoint string `yaml:"endpoint,omitempty"`
+}
+
+// R2Config defines Cloudflare R2 storage settings.
+type R2Config struct {
+	AccountID   string           `yaml:"account_id"`
+	Bucket      string           `yaml:"bucket"`
+	Region      string           `yaml:"region,omitempty"`
+	Prefix      string           `yaml:"prefix,omitempty"`
+	Credentials CredentialConfig `yaml:"credentials"`
 }
 
 // FSConfig defines local filesystem storage settings.
@@ -180,6 +190,16 @@ func (c *Config) Validate() error {
 		if c.Storage.S3.Region == "" {
 			return fmt.Errorf("storage.s3.region is required")
 		}
+	case "r2":
+		if c.Storage.R2 == nil {
+			return fmt.Errorf("storage.r2 configuration is required when type is r2")
+		}
+		if c.Storage.R2.AccountID == "" {
+			return fmt.Errorf("storage.r2.account_id is required")
+		}
+		if c.Storage.R2.Bucket == "" {
+			return fmt.Errorf("storage.r2.bucket is required")
+		}
 	case "filesystem":
 		if c.Storage.Filesystem == nil {
 			return fmt.Errorf("storage.filesystem configuration is required when type is filesystem")
@@ -188,7 +208,7 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("storage.filesystem.base_path is required")
 	}
 	default:
-		return fmt.Errorf("unsupported storage type: %s (must be s3 or filesystem)", c.Storage.Type)
+		return fmt.Errorf("unsupported storage type: %s (must be s3, r2, or filesystem)", c.Storage.Type)
 	}
 
 	if len(c.Rules) == 0 {

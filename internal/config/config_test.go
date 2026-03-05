@@ -208,6 +208,70 @@ func TestValidate(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "valid r2 config",
+			cfg: Config{
+				Storage: StorageConfig{
+					Type: "r2",
+					R2:   &R2Config{AccountID: "abc123", Bucket: "my-bucket"},
+				},
+				Rules: []Rule{
+					{
+						Name:      "r1",
+						BatchSize: 1000,
+						Source: SourceConfig{
+							Engine:   "postgres",
+							Host:     "localhost",
+							Port:     5432,
+							Database: "db",
+							Credentials: CredentialConfig{
+								Type: "env",
+							},
+						},
+						Tables: []TableConfig{
+							{Name: "t1", DateColumn: "created_at", DaysOnline: 30},
+						},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "r2 missing account_id",
+			cfg: Config{
+				Storage: StorageConfig{
+					Type: "r2",
+					R2:   &R2Config{Bucket: "my-bucket"},
+				},
+				Rules: []Rule{
+					{Name: "r1", BatchSize: 1000, Source: SourceConfig{Engine: "postgres", Host: "h", Port: 1, Database: "d", Credentials: CredentialConfig{Type: "env"}}, Tables: []TableConfig{{Name: "t", DateColumn: "c", DaysOnline: 1}}},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "r2 missing bucket",
+			cfg: Config{
+				Storage: StorageConfig{
+					Type: "r2",
+					R2:   &R2Config{AccountID: "abc123"},
+				},
+				Rules: []Rule{
+					{Name: "r1", BatchSize: 1000, Source: SourceConfig{Engine: "postgres", Host: "h", Port: 1, Database: "d", Credentials: CredentialConfig{Type: "env"}}, Tables: []TableConfig{{Name: "t", DateColumn: "c", DaysOnline: 1}}},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "r2 missing config block",
+			cfg: Config{
+				Storage: StorageConfig{Type: "r2"},
+				Rules: []Rule{
+					{Name: "r1", BatchSize: 1000, Source: SourceConfig{Engine: "postgres", Host: "h", Port: 1, Database: "d", Credentials: CredentialConfig{Type: "env"}}, Tables: []TableConfig{{Name: "t", DateColumn: "c", DaysOnline: 1}}},
+				},
+			},
+			wantErr: true,
+		},
+		{
 			name: "missing table date_column",
 			cfg: Config{
 				Storage: StorageConfig{
