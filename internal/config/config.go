@@ -23,6 +23,7 @@ type StorageConfig struct {
 	Type       string          `yaml:"type"`
 	S3         *S3Config       `yaml:"s3,omitempty"`
 	R2         *R2Config       `yaml:"r2,omitempty"`
+	GCS        *GCSConfig      `yaml:"gcs,omitempty"`
 	Filesystem *FSConfig        `yaml:"filesystem,omitempty"`
 	Lifecycle  LifecycleConfig `yaml:"lifecycle"`
 }
@@ -42,6 +43,12 @@ type R2Config struct {
 	Region      string           `yaml:"region,omitempty"`
 	Prefix      string           `yaml:"prefix,omitempty"`
 	Credentials CredentialConfig `yaml:"credentials"`
+}
+
+// GCSConfig defines Google Cloud Storage settings.
+type GCSConfig struct {
+	Bucket string `yaml:"bucket"`
+	Prefix string `yaml:"prefix,omitempty"`
 }
 
 // FSConfig defines local filesystem storage settings.
@@ -200,6 +207,13 @@ func (c *Config) Validate() error {
 		if c.Storage.R2.Bucket == "" {
 			return fmt.Errorf("storage.r2.bucket is required")
 		}
+	case "gcs":
+		if c.Storage.GCS == nil {
+			return fmt.Errorf("storage.gcs configuration is required when type is gcs")
+		}
+		if c.Storage.GCS.Bucket == "" {
+			return fmt.Errorf("storage.gcs.bucket is required")
+		}
 	case "filesystem":
 		if c.Storage.Filesystem == nil {
 			return fmt.Errorf("storage.filesystem configuration is required when type is filesystem")
@@ -208,7 +222,7 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("storage.filesystem.base_path is required")
 	}
 	default:
-		return fmt.Errorf("unsupported storage type: %s (must be s3, r2, or filesystem)", c.Storage.Type)
+		return fmt.Errorf("unsupported storage type: %s (must be s3, r2, gcs, or filesystem)", c.Storage.Type)
 	}
 
 	if len(c.Rules) == 0 {

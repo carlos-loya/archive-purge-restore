@@ -21,7 +21,9 @@ apr restore --rule prod-orders --date 2024-06-15   # Bring them back
 | Databases | Storage backends |
 |-----------|-----------------|
 | PostgreSQL | AWS S3 |
-| MySQL | Local filesystem |
+| MySQL | Google Cloud Storage (GCS) |
+| | Cloudflare R2 |
+| | Local filesystem |
 
 ## Quick Start
 
