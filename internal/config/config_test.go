@@ -272,6 +272,57 @@ func TestValidate(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "valid gcs config",
+			cfg: Config{
+				Storage: StorageConfig{
+					Type: "gcs",
+					GCS:  &GCSConfig{Bucket: "my-bucket"},
+				},
+				Rules: []Rule{
+					{
+						Name:      "r1",
+						BatchSize: 1000,
+						Source: SourceConfig{
+							Engine:   "postgres",
+							Host:     "localhost",
+							Port:     5432,
+							Database: "db",
+							Credentials: CredentialConfig{
+								Type: "env",
+							},
+						},
+						Tables: []TableConfig{
+							{Name: "t1", DateColumn: "created_at", DaysOnline: 30},
+						},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "gcs missing bucket",
+			cfg: Config{
+				Storage: StorageConfig{
+					Type: "gcs",
+					GCS:  &GCSConfig{},
+				},
+				Rules: []Rule{
+					{Name: "r1", BatchSize: 1000, Source: SourceConfig{Engine: "postgres", Host: "h", Port: 1, Database: "d", Credentials: CredentialConfig{Type: "env"}}, Tables: []TableConfig{{Name: "t", DateColumn: "c", DaysOnline: 1}}},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "gcs missing config block",
+			cfg: Config{
+				Storage: StorageConfig{Type: "gcs"},
+				Rules: []Rule{
+					{Name: "r1", BatchSize: 1000, Source: SourceConfig{Engine: "postgres", Host: "h", Port: 1, Database: "d", Credentials: CredentialConfig{Type: "env"}}, Tables: []TableConfig{{Name: "t", DateColumn: "c", DaysOnline: 1}}},
+				},
+			},
+			wantErr: true,
+		},
+		{
 			name: "missing table date_column",
 			cfg: Config{
 				Storage: StorageConfig{

@@ -19,6 +19,7 @@ import (
 	dbpg "github.com/carlos-loya/archive-purge-restore/internal/provider/database/postgres"
 	"github.com/carlos-loya/archive-purge-restore/internal/provider/storage"
 	"github.com/carlos-loya/archive-purge-restore/internal/provider/storage/filesystem"
+	gcsstore "github.com/carlos-loya/archive-purge-restore/internal/provider/storage/gcs"
 	r2store "github.com/carlos-loya/archive-purge-restore/internal/provider/storage/r2"
 	s3store "github.com/carlos-loya/archive-purge-restore/internal/provider/storage/s3"
 	"github.com/carlos-loya/archive-purge-restore/internal/scheduler"
@@ -38,7 +39,7 @@ func init() {
 		Use:   "apr",
 		Short: "Archive-Purge-Restore: move old data to cheap storage",
 		Long: `APR (Archive-Purge-Restore) is a CLI tool that archives old database rows
-to object storage (S3, local filesystem) as Parquet files, deletes them
+to object storage (S3, GCS, R2, local filesystem) as Parquet files, deletes them
 from the source database, and can restore them on demand.`,
 	}
 
@@ -99,6 +100,8 @@ func makeStorage(ctx context.Context, cfg config.StorageConfig) (storage.Provide
 		return s3store.New(ctx, cfg.S3.Bucket, cfg.S3.Region, cfg.S3.Prefix, cfg.S3.Endpoint)
 	case "r2":
 		return r2store.New(ctx, cfg.R2.AccountID, cfg.R2.Bucket, cfg.R2.Region, cfg.R2.Prefix)
+	case "gcs":
+		return gcsstore.New(ctx, cfg.GCS.Bucket, cfg.GCS.Prefix)
 	default:
 		return nil, fmt.Errorf("unsupported storage type: %s", cfg.Type)
 	}
