@@ -15,6 +15,22 @@ services:
       timeout: 5s
       retries: 15
 
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    ports:
+      - "15433:5432"
+    environment:
+      POSTGRES_USER: apr_test
+      POSTGRES_PASSWORD: apr_test_pass
+      POSTGRES_DB: apr_test_tsdb
+    volumes:
+      - ./seed/timescaledb:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U apr_test -d apr_test_tsdb"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
   mysql:
     image: mysql:8.0
     ports:

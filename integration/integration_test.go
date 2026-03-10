@@ -14,6 +14,7 @@ import (
 	"github.com/carlos-loya/archive-purge-restore/internal/engine"
 	"github.com/carlos-loya/archive-purge-restore/internal/provider/database/mysql"
 	"github.com/carlos-loya/archive-purge-restore/internal/provider/database/postgres"
+	"github.com/carlos-loya/archive-purge-restore/internal/provider/database/timescaledb"
 	"github.com/carlos-loya/archive-purge-restore/internal/provider/storage/filesystem"
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/lib/pq"
@@ -31,6 +32,12 @@ const (
 	myDB   = "apr_test_my"
 	myUser = "apr_test"
 	myPass = "apr_test_pass"
+
+	tsdbHost = "localhost"
+	tsdbPort = 15433
+	tsdbDB   = "apr_test_tsdb"
+	tsdbUser = "apr_test"
+	tsdbPass = "apr_test_pass"
 )
 
 func pgRule(tables []config.TableConfig) config.Rule {
@@ -557,5 +564,327 @@ func TestNullableRoundTrip(t *testing.T) {
 	}
 	if dianaNotes.Valid {
 		t.Errorf("expected Diana's notes to be NULL, got %q", dianaNotes.String)
+	}
+}
+
+// --- TimescaleDB tests ---
+
+func tsdbRule(tables []config.TableConfig) config.Rule {
+	return config.Rule{
+		Name:      "tsdb-test",
+		BatchSize: 100,
+		Source: config.SourceConfig{
+			Engine:   "timescaledb",
+			Host:     tsdbHost,
+			Port:     tsdbPort,
+			Database: tsdbDB,
+			SSLMode:  "disable",
+			Credentials: config.CredentialConfig{
+				Type:     "static",
+				Username: tsdbUser,
+				Password: tsdbPass,
+			},
+		},
+		Tables: tables,
+	}
+}
+
+var sensorDataTbl = config.TableConfig{
+	Name:       "sensor_data",
+	DateColumn: "time",
+	DaysOnline: 30,
+}
+
+var eventsTbl = config.TableConfig{
+	Name:       "events",
+	DateColumn: "created_at",
+	DaysOnline: 30,
+}
+
+func tsdbDSN() string {
+	return fmt.Sprintf("host=%s port=%d dbname=%s user=%s password=%s sslmode=disable",
+		tsdbHost, tsdbPort, tsdbDB, tsdbUser, tsdbPass)
+}
+
+// resetTimescaleDB truncates tables and re-seeds data.
+func resetTimescaleDB(t *testing.T) {
+	t.Helper()
+	db, err := sql.Open("postgres", tsdbDSN())
+	if err != nil {
+		t.Fatalf("opening timescaledb for reset: %v", err)
+	}
+	defer db.Close()
+
+	stmts := []string{
+		"TRUNCATE sensor_data",
+		"TRUNCATE events RESTART IDENTITY",
+		// Old sensor data (spanning multiple chunks)
+		`INSERT INTO sensor_data (time, sensor_id, temperature, humidity, location) VALUES
+			('2023-01-15 10:00:00+00', 1, 22.5, 45.0, 'warehouse-A'),
+			('2023-01-15 10:05:00+00', 2, 23.1, 44.5, 'warehouse-B'),
+			('2023-02-20 11:30:00+00', 1, 21.0, 50.0, 'warehouse-A'),
+			('2023-02-20 11:35:00+00', 3, 19.8, 55.0, 'warehouse-C'),
+			('2023-03-10 09:15:00+00', 2, 24.0, 42.0, 'warehouse-B'),
+			('2023-04-05 14:00:00+00', 1, 25.5, 38.0, 'warehouse-A'),
+			('2023-05-25 16:45:00+00', 3, 20.0, 48.0, 'warehouse-C')`,
+		// Recent sensor data
+		`INSERT INTO sensor_data (time, sensor_id, temperature, humidity, location) VALUES
+			(NOW() - INTERVAL '1 day',  1, 22.0, 46.0, 'warehouse-A'),
+			(NOW() - INTERVAL '2 days', 2, 23.5, 43.0, 'warehouse-B'),
+			(NOW() - INTERVAL '5 days', 3, 21.5, 49.0, 'warehouse-C')`,
+		// Old events
+		`INSERT INTO events (event_type, payload, created_at) VALUES
+			('login',  '{"user": "alice"}',   '2023-01-15 10:00:00'),
+			('logout', '{"user": "alice"}',   '2023-01-15 18:00:00'),
+			('login',  '{"user": "bob"}',     '2023-02-20 11:30:00'),
+			('error',  NULL,                  '2023-03-10 09:15:00'),
+			('login',  '{"user": "charlie"}', '2023-04-05 14:00:00')`,
+		// Recent events
+		`INSERT INTO events (event_type, payload, created_at) VALUES
+			('login',  '{"user": "diana"}', NOW() - INTERVAL '1 day'),
+			('logout', '{"user": "diana"}', NOW() - INTERVAL '1 day'),
+			('login',  '{"user": "eve"}',   NOW() - INTERVAL '3 days')`,
+	}
+	for _, s := range stmts {
+		if _, err := db.Exec(s); err != nil {
+			t.Fatalf("reset timescaledb (%s): %v", s[:40], err)
+		}
+	}
+}
+
+func TestTimescaleDBHypertableArchiveAndRestore(t *testing.T) {
+	resetTimescaleDB(t)
+	ctx := context.Background()
+
+	tsdbProvider := timescaledb.New(tsdbHost, tsdbPort, tsdbDB, tsdbUser, tsdbPass, "disable", config.PoolConfig{}, newLogger())
+	if err := tsdbProvider.Connect(ctx); err != nil {
+		t.Fatalf("connecting timescaledb provider: %v", err)
+	}
+	defer tsdbProvider.Close()
+
+	storePath := t.TempDir()
+	store, err := filesystem.New(storePath)
+	if err != nil {
+		t.Fatalf("creating filesystem store: %v", err)
+	}
+
+	logger := newLogger()
+	archiver := engine.NewArchiver(store, logger)
+	restorer := engine.NewRestorer(store, logger)
+
+	rule := tsdbRule([]config.TableConfig{sensorDataTbl})
+
+	// Archive: should archive the 7 old sensor rows.
+	result, err := archiver.Archive(ctx, rule, tsdbProvider)
+	if err != nil {
+		t.Fatalf("archive failed: %v", err)
+	}
+
+	if len(result.Tables) != 1 {
+		t.Fatalf("expected 1 table result, got %d", len(result.Tables))
+	}
+	if result.Tables[0].RowsArchived != 7 {
+		t.Errorf("expected 7 rows archived, got %d", result.Tables[0].RowsArchived)
+	}
+
+	// RowsDeleted may be 0 if drop_chunks() already removed all rows,
+	// or 7 if row-by-row deletion handled it. Either way, the rows are gone.
+	// Verify by checking actual DB state.
+	rawDB, _ := sql.Open("postgres", tsdbDSN())
+	defer rawDB.Close()
+
+	if n := countRows(t, rawDB, "sensor_data"); n != 3 {
+		t.Errorf("expected 3 rows remaining after archive, got %d", n)
+	}
+
+	// Restore.
+	opts := engine.RestoreOptions{Rule: rule}
+	restoreResult, err := restorer.Restore(ctx, opts, tsdbProvider)
+	if err != nil {
+		t.Fatalf("restore failed: %v", err)
+	}
+
+	if restoreResult.Tables[0].RowsRestored != 7 {
+		t.Errorf("expected 7 rows restored, got %d", restoreResult.Tables[0].RowsRestored)
+	}
+
+	if n := countRows(t, rawDB, "sensor_data"); n != 10 {
+		t.Errorf("expected 10 total rows after restore, got %d", n)
+	}
+}
+
+func TestTimescaleDBRegularTableFallback(t *testing.T) {
+	resetTimescaleDB(t)
+	ctx := context.Background()
+
+	tsdbProvider := timescaledb.New(tsdbHost, tsdbPort, tsdbDB, tsdbUser, tsdbPass, "disable", config.PoolConfig{}, newLogger())
+	if err := tsdbProvider.Connect(ctx); err != nil {
+		t.Fatalf("connecting timescaledb provider: %v", err)
+	}
+	defer tsdbProvider.Close()
+
+	storePath := t.TempDir()
+	store, err := filesystem.New(storePath)
+	if err != nil {
+		t.Fatalf("creating filesystem store: %v", err)
+	}
+
+	logger := newLogger()
+	archiver := engine.NewArchiver(store, logger)
+	restorer := engine.NewRestorer(store, logger)
+
+	// Archive the regular (non-hypertable) events table.
+	rule := tsdbRule([]config.TableConfig{eventsTbl})
+
+	result, err := archiver.Archive(ctx, rule, tsdbProvider)
+	if err != nil {
+		t.Fatalf("archive failed: %v", err)
+	}
+
+	if result.Tables[0].RowsArchived != 5 {
+		t.Errorf("expected 5 rows archived, got %d", result.Tables[0].RowsArchived)
+	}
+	if result.Tables[0].RowsDeleted != 5 {
+		t.Errorf("expected 5 rows deleted, got %d", result.Tables[0].RowsDeleted)
+	}
+
+	rawDB, _ := sql.Open("postgres", tsdbDSN())
+	defer rawDB.Close()
+
+	if n := countRows(t, rawDB, "events"); n != 3 {
+		t.Errorf("expected 3 rows remaining, got %d", n)
+	}
+
+	// Restore.
+	opts := engine.RestoreOptions{Rule: rule}
+	restoreResult, err := restorer.Restore(ctx, opts, tsdbProvider)
+	if err != nil {
+		t.Fatalf("restore failed: %v", err)
+	}
+
+	if restoreResult.Tables[0].RowsRestored != 5 {
+		t.Errorf("expected 5 rows restored, got %d", restoreResult.Tables[0].RowsRestored)
+	}
+
+	if n := countRows(t, rawDB, "events"); n != 8 {
+		t.Errorf("expected 8 total rows after restore, got %d", n)
+	}
+}
+
+func TestTimescaleDBChunkDeletion(t *testing.T) {
+	resetTimescaleDB(t)
+	ctx := context.Background()
+
+	tsdbProvider := timescaledb.New(tsdbHost, tsdbPort, tsdbDB, tsdbUser, tsdbPass, "disable", config.PoolConfig{}, newLogger())
+	if err := tsdbProvider.Connect(ctx); err != nil {
+		t.Fatalf("connecting timescaledb provider: %v", err)
+	}
+	defer tsdbProvider.Close()
+
+	rawDB, _ := sql.Open("postgres", tsdbDSN())
+	defer rawDB.Close()
+
+	// Count chunks before archive.
+	var chunksBefore int
+	err := rawDB.QueryRow(`
+		SELECT count(*) FROM timescaledb_information.chunks
+		WHERE hypertable_name = 'sensor_data'
+	`).Scan(&chunksBefore)
+	if err != nil {
+		t.Fatalf("counting chunks before: %v", err)
+	}
+	t.Logf("chunks before archive: %d", chunksBefore)
+
+	if chunksBefore == 0 {
+		t.Fatal("expected at least 1 chunk before archive")
+	}
+
+	storePath := t.TempDir()
+	store, err := filesystem.New(storePath)
+	if err != nil {
+		t.Fatalf("creating filesystem store: %v", err)
+	}
+
+	logger := newLogger()
+	archiver := engine.NewArchiver(store, logger)
+
+	rule := tsdbRule([]config.TableConfig{sensorDataTbl})
+
+	// Archive: triggers both chunk-aware deletion and row-by-row deletion.
+	result, archErr := archiver.Archive(ctx, rule, tsdbProvider)
+	if archErr != nil {
+		t.Fatalf("archive failed: %v", archErr)
+	}
+
+	if result.Tables[0].RowsArchived != 7 {
+		t.Errorf("expected 7 rows archived, got %d", result.Tables[0].RowsArchived)
+	}
+
+	// After archive, old chunks should have been dropped.
+	var chunksAfter int
+	err = rawDB.QueryRow(`
+		SELECT count(*) FROM timescaledb_information.chunks
+		WHERE hypertable_name = 'sensor_data'
+	`).Scan(&chunksAfter)
+	if err != nil {
+		t.Fatalf("counting chunks after: %v", err)
+	}
+	t.Logf("chunks after archive: %d", chunksAfter)
+
+	// We expect fewer chunks after archive since old ones were dropped.
+	if chunksAfter >= chunksBefore {
+		t.Errorf("expected fewer chunks after archive: before=%d, after=%d", chunksBefore, chunksAfter)
+	}
+
+	// Only recent data should remain.
+	if n := countRows(t, rawDB, "sensor_data"); n != 3 {
+		t.Errorf("expected 3 rows remaining, got %d", n)
+	}
+}
+
+func TestTimescaleDBArchiveIsIdempotent(t *testing.T) {
+	resetTimescaleDB(t)
+	ctx := context.Background()
+
+	tsdbProvider := timescaledb.New(tsdbHost, tsdbPort, tsdbDB, tsdbUser, tsdbPass, "disable", config.PoolConfig{}, newLogger())
+	if err := tsdbProvider.Connect(ctx); err != nil {
+		t.Fatalf("connecting timescaledb provider: %v", err)
+	}
+	defer tsdbProvider.Close()
+
+	storePath := t.TempDir()
+	store, err := filesystem.New(storePath)
+	if err != nil {
+		t.Fatalf("creating filesystem store: %v", err)
+	}
+
+	logger := newLogger()
+	archiver := engine.NewArchiver(store, logger)
+
+	rule := tsdbRule([]config.TableConfig{sensorDataTbl})
+
+	// First archive.
+	result1, err := archiver.Archive(ctx, rule, tsdbProvider)
+	if err != nil {
+		t.Fatalf("first archive failed: %v", err)
+	}
+	if result1.Tables[0].RowsArchived != 7 {
+		t.Errorf("first run: expected 7 rows archived, got %d", result1.Tables[0].RowsArchived)
+	}
+
+	// Second archive: should find 0 old rows.
+	result2, err := archiver.Archive(ctx, rule, tsdbProvider)
+	if err != nil {
+		t.Fatalf("second archive failed: %v", err)
+	}
+	if result2.Tables[0].RowsArchived != 0 {
+		t.Errorf("second run: expected 0 rows archived, got %d", result2.Tables[0].RowsArchived)
+	}
+
+	rawDB, _ := sql.Open("postgres", tsdbDSN())
+	defer rawDB.Close()
+
+	if n := countRows(t, rawDB, "sensor_data"); n != 3 {
+		t.Errorf("expected 3 rows remaining, got %d", n)
 	}
 }

@@ -11,7 +11,7 @@ make lint           # go vet ./...
 make clean          # Remove binary
 
 # Integration tests (requires Docker):
-make dev-up          # Start PostgreSQL 16 + MySQL 8.0 in Docker
+make dev-up          # Start PostgreSQL 16 + MySQL 8.0 + TimescaleDB in Docker
 make dev-down        # Stop containers, remove volumes
 make dev-reset       # dev-down + dev-up (clean slate)
 make test-integration # dev-up + run integration tests
@@ -32,10 +32,11 @@ go test ./internal/config/ -v -run TestValidate
 ```
 cmd/apr/main.go                          # CLI entry point, wires all components together
 dev/
-  docker-compose.yml                     # PostgreSQL 16 + MySQL 8.0 for integration tests
+  docker-compose.yml                     # PostgreSQL 16 + MySQL 8.0 + TimescaleDB for integration tests
   apr.dev.yaml                           # Dev config pointing at Docker containers
   seed/postgres/{01_schema,02_data}.sql  # Seed schema and data for PostgreSQL
   seed/mysql/{01_schema,02_data}.sql     # Seed schema and data for MySQL
+  seed/timescaledb/{01_schema,02_data}.sql # Seed schema and data for TimescaleDB (hypertable + regular table)
 integration/integration_test.go          # End-to-end tests (build tag: integration)
 internal/
   config/config.go                       # YAML config parsing, validation, defaults

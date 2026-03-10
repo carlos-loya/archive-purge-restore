@@ -57,8 +57,10 @@ func (p *Provider) DeleteByTimeRange(ctx context.Context, table, dateColumn stri
 	}
 
 	// drop_chunks() drops all chunks whose range_end <= older_than.
+	// The $1::timestamptz cast is required because drop_chunks() cannot
+	// infer the parameter type from a polymorphic function signature.
 	query := fmt.Sprintf(
-		`SELECT drop_chunks('%s', $1)`,
+		`SELECT drop_chunks('%s', $1::timestamptz)`,
 		strings.ReplaceAll(table, "'", "''"),
 	)
 
