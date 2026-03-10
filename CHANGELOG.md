@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- TimescaleDB database provider with chunk-aware deletion via `drop_chunks()` for hypertables (#15)
+- `ChunkAwareDeleter` interface for providers that support efficient time-range deletion
+
 ## [0.2.0] - 2026-02-25
 
 ### Added

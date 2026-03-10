@@ -59,6 +59,12 @@ func (p *Provider) Connect(ctx context.Context) error {
 	return nil
 }
 
+// DB returns the underlying *sql.DB connection. This is used by
+// providers that embed PostgreSQL (e.g., TimescaleDB).
+func (p *Provider) DB() *sql.DB {
+	return p.db
+}
+
 func (p *Provider) Close() error {
 	if p.db != nil {
 		return p.db.Close()

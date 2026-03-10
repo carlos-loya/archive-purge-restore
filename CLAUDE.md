@@ -45,9 +45,10 @@ internal/
     restorer.go                          # Restore: find parquet files → read → INSERT
   provider/
     database/
-      provider.go                        # DatabaseProvider + RowIterator interfaces
+      provider.go                        # DatabaseProvider + RowIterator + ChunkAwareDeleter interfaces
       postgres/postgres.go               # PostgreSQL: double-quote identifiers, $N placeholders
       mysql/mysql.go                     # MySQL: backtick identifiers, ? placeholders
+      timescaledb/timescaledb.go         # TimescaleDB: embeds Postgres, adds chunk-aware drop_chunks()
     storage/
       provider.go                        # StorageProvider interface
       filesystem/filesystem.go           # Local FS (dev/testing)
@@ -93,7 +94,7 @@ Search order: `--config` flag, `./apr.yaml`, `./apr.yml`, `~/.apr/config.yaml`, 
 
 Defaults: `batch_size=10000`, `history.path=~/.apr/history.db`, PostgreSQL `ssl_mode=prefer`.
 
-Supported storage types: `filesystem`, `s3`. Supported engines: `postgres`, `mysql`.
+Supported storage types: `filesystem`, `s3`, `r2`, `gcs`. Supported engines: `postgres`, `mysql`, `timescaledb`.
 
 Credentials resolve via `type: env` (reads env vars) or `type: static` (inline, not recommended).
 
@@ -124,7 +125,8 @@ apr version
 
 ## Conventions
 
-- **Identifier quoting**: PostgreSQL uses `"double_quotes"` with `$N` placeholders; MySQL uses `` `backticks` `` with `?` placeholders
+- **Identifier quoting**: PostgreSQL/TimescaleDB uses `"double_quotes"` with `$N` placeholders; MySQL uses `` `backticks` `` with `?` placeholders
+- **TimescaleDB**: Embeds the Postgres provider, adds `ChunkAwareDeleter` for efficient `drop_chunks()` on hypertables. Falls back to standard Postgres behavior for regular tables or when TimescaleDB extension is unavailable
 - **Errors**: Always wrap with `fmt.Errorf("context: %w", err)`
 - **File layout**: Interfaces in `provider.go`, implementations in `{engine}.go`, tests in `*_test.go` (same package)
 - **Tests**: Use `t.TempDir()` for filesystem tests, mock `database.Provider` for engine tests (see `archiver_test.go` for the mock pattern). Integration tests use `//go:build integration` tag and run against Docker containers

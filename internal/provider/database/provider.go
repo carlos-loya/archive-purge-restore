@@ -29,6 +29,15 @@ type RowIterator interface {
 	io.Closer
 }
 
+// ChunkAwareDeleter is an optional interface that providers can implement
+// to support efficient chunk-level deletion for time-series databases.
+type ChunkAwareDeleter interface {
+	// DeleteByTimeRange drops all data older than the cutoff for the given table.
+	// Returns the number of chunks dropped. If the table does not support
+	// chunk-level deletion, returns (0, nil).
+	DeleteByTimeRange(ctx context.Context, table, dateColumn string, before time.Time) (int, error)
+}
+
 // Provider abstracts database operations for archive and restore.
 type Provider interface {
 	// Connect establishes a connection to the database.

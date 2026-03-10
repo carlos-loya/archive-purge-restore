@@ -323,6 +323,34 @@ func TestValidate(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "valid timescaledb config",
+			cfg: Config{
+				Storage: StorageConfig{
+					Type:       "filesystem",
+					Filesystem: &FSConfig{BasePath: "/tmp/test"},
+				},
+				Rules: []Rule{
+					{
+						Name:      "r1",
+						BatchSize: 1000,
+						Source: SourceConfig{
+							Engine:   "timescaledb",
+							Host:     "localhost",
+							Port:     5432,
+							Database: "db",
+							Credentials: CredentialConfig{
+								Type: "env",
+							},
+						},
+						Tables: []TableConfig{
+							{Name: "t1", DateColumn: "time", DaysOnline: 7},
+						},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
 			name: "missing table date_column",
 			cfg: Config{
 				Storage: StorageConfig{
@@ -445,6 +473,42 @@ history:
 			t.Errorf("History.Path = %q, want cleaned path %q", cfg.History.Path, expected)
 		}
 	})
+}
+
+func TestTimescaleDBSSLModeDefault(t *testing.T) {
+	content := `
+storage:
+  type: filesystem
+  filesystem:
+    base_path: /tmp/apr-test
+rules:
+  - name: tsdb-rule
+    source:
+      engine: timescaledb
+      host: localhost
+      port: 5432
+      database: metrics
+      credentials:
+        type: env
+    tables:
+      - name: sensor_data
+        date_column: time
+        days_online: 7
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if cfg.Rules[0].Source.SSLMode != "prefer" {
+		t.Errorf("SSLMode = %q, want %q", cfg.Rules[0].Source.SSLMode, "prefer")
+	}
 }
 
 func TestFindRule(t *testing.T) {

@@ -17,6 +17,7 @@ import (
 	"github.com/carlos-loya/archive-purge-restore/internal/provider/database"
 	dbmysql "github.com/carlos-loya/archive-purge-restore/internal/provider/database/mysql"
 	dbpg "github.com/carlos-loya/archive-purge-restore/internal/provider/database/postgres"
+	dbtsdb "github.com/carlos-loya/archive-purge-restore/internal/provider/database/timescaledb"
 	"github.com/carlos-loya/archive-purge-restore/internal/provider/storage"
 	"github.com/carlos-loya/archive-purge-restore/internal/provider/storage/filesystem"
 	gcsstore "github.com/carlos-loya/archive-purge-restore/internal/provider/storage/gcs"
@@ -114,6 +115,8 @@ func makeDBProvider(src config.SourceConfig) (database.Provider, error) {
 		return dbpg.New(src.Host, src.Port, src.Database, user, pass, src.SSLMode, src.Pool), nil
 	case "mysql":
 		return dbmysql.New(src.Host, src.Port, src.Database, user, pass, src.Pool), nil
+	case "timescaledb":
+		return dbtsdb.New(src.Host, src.Port, src.Database, user, pass, src.SSLMode, src.Pool, nil), nil
 	default:
 		return nil, fmt.Errorf("unsupported engine: %s", src.Engine)
 	}

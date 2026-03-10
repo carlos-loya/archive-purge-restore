@@ -22,7 +22,7 @@ apr restore --rule prod-orders --date 2024-06-15   # Bring them back
 |-----------|-----------------|
 | PostgreSQL | AWS S3 |
 | MySQL | Google Cloud Storage (GCS) |
-| | Cloudflare R2 |
+| TimescaleDB | Cloudflare R2 |
 | | Local filesystem |
 
 ## Quick Start
@@ -76,6 +76,27 @@ rules:
 
 ```bash
 apr validate    # Check your config
+```
+
+**TimescaleDB** hypertables are also supported — use `engine: timescaledb` to enable chunk-aware deletion via `drop_chunks()`:
+
+```yaml
+rules:
+  - name: iot-metrics
+    schedule: "0 0 * * *"
+    source:
+      engine: timescaledb
+      host: tsdb.example.com
+      port: 5432
+      database: metrics
+      credentials:
+        type: env
+        username_env: TSDB_USER
+        password_env: TSDB_PASS
+    tables:
+      - name: sensor_data
+        date_column: time
+        days_online: 7
 ```
 
 ### Run
