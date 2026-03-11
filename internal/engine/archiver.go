@@ -93,6 +93,23 @@ func (a *Archiver) Archive(ctx context.Context, rule config.Rule, db database.Pr
 	}
 
 	// Phase 2: Delete archived rows from source.
+	// If the provider supports chunk-aware deletion (e.g., TimescaleDB),
+	// drop fully expired chunks first for efficiency.
+	if cad, ok := db.(database.ChunkAwareDeleter); ok {
+		for _, ta := range archives {
+			if ta.rowCount == 0 {
+				continue
+			}
+			dropped, err := cad.DeleteByTimeRange(ctx, ta.table, ta.dateColumn, ta.cutoff)
+			if err != nil {
+				a.log.Warn("chunk-aware delete failed, falling back to row-by-row",
+					"run_id", runID, "table", ta.table, "error", err)
+			} else if dropped > 0 {
+				a.log.Info("dropped full chunks", "run_id", runID, "table", ta.table, "chunks", dropped)
+			}
+		}
+	}
+
 	for i, ta := range archives {
 		if ta.rowCount == 0 {
 			continue
@@ -189,8 +206,10 @@ func (a *Archiver) archiveTable(ctx context.Context, runID string, rule config.R
 	}
 
 	ta := &tableArchive{
-		table:  tbl.Name,
-		pkCols: pkCols,
+		table:      tbl.Name,
+		dateColumn: tbl.DateColumn,
+		cutoff:     cutoff,
+		pkCols:     pkCols,
 	}
 
 	batchNum := 0
@@ -278,11 +297,13 @@ func (a *Archiver) cleanupPendingFiles(ctx context.Context, runID string, archiv
 }
 
 type tableArchive struct {
-	table    string
-	pkCols   []string
-	pkValues [][]any
-	files    []string
-	rowCount int64
+	table      string
+	dateColumn string
+	cutoff     time.Time
+	pkCols     []string
+	pkValues   [][]any
+	files      []string
+	rowCount   int64
 }
 
 func archiveKey(database, table string, cutoff time.Time, runID string, batch int) string {

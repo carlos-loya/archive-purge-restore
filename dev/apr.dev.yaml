@@ -28,6 +28,27 @@ rules:
         date_column: created_at
         days_online: 30
 
+  - name: tsdb-test
+    schedule: "0 2 * * *"
+    batch_size: 100
+    source:
+      engine: timescaledb
+      host: localhost
+      port: 15433
+      database: apr_test_tsdb
+      ssl_mode: disable
+      credentials:
+        type: static
+        username: apr_test
+        password: apr_test_pass
+    tables:
+      - name: sensor_data
+        date_column: time
+        days_online: 30
+      - name: events
+        date_column: created_at
+        days_online: 30
+
   - name: my-test
     schedule: "0 2 * * *"
     batch_size: 100

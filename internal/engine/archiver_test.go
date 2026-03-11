@@ -293,6 +293,66 @@ func TestArchiveDryRunNoRows(t *testing.T) {
 	}
 }
 
+// mockChunkAwareDB implements both database.Provider and database.ChunkAwareDeleter.
+type mockChunkAwareDB struct {
+	mockDB
+	chunksDropped int
+	dropCalls     []string // tables that DeleteByTimeRange was called on
+}
+
+func (m *mockChunkAwareDB) DeleteByTimeRange(ctx context.Context, table, dateColumn string, before time.Time) (int, error) {
+	m.dropCalls = append(m.dropCalls, table)
+	return m.chunksDropped, nil
+}
+
+func TestArchiveChunkAwareDeletion(t *testing.T) {
+	dir := t.TempDir()
+	store, err := filesystem.New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	archiver := NewArchiver(store, logger)
+
+	db := &mockChunkAwareDB{
+		mockDB: mockDB{
+			schema: []database.ColumnInfo{
+				{Name: "id", Type: "int4", Nullable: false},
+				{Name: "value", Type: "float8", Nullable: false},
+				{Name: "time", Type: "timestamptz", Nullable: false},
+			},
+			pkCols: []string{"id"},
+			rows: []database.Row{
+				{"id": int32(1), "value": 42.0, "time": "2025-01-01T00:00:00Z"},
+				{"id": int32(2), "value": 43.0, "time": "2025-01-02T00:00:00Z"},
+			},
+		},
+		chunksDropped: 3,
+	}
+
+	rule := config.Rule{
+		Name:      "tsdb-rule",
+		BatchSize: 100,
+		Source:    config.SourceConfig{Database: "metricsdb"},
+		Tables:    []config.TableConfig{{Name: "sensor_data", DateColumn: "time", DaysOnline: 7}},
+	}
+
+	result, err := archiver.Archive(context.Background(), rule, db)
+	if err != nil {
+		t.Fatalf("Archive() error: %v", err)
+	}
+
+	if result.Tables[0].RowsArchived != 2 {
+		t.Errorf("RowsArchived = %d, want 2", result.Tables[0].RowsArchived)
+	}
+
+	// Verify DeleteByTimeRange was called for the table.
+	if len(db.dropCalls) != 1 || db.dropCalls[0] != "sensor_data" {
+		t.Errorf("dropCalls = %v, want [sensor_data]", db.dropCalls)
+	}
+}
+
 func TestArchiveDryRunMultipleTables(t *testing.T) {
 	dir := t.TempDir()
 	store, err := filesystem.New(dir)

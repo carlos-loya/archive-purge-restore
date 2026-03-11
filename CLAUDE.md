@@ -11,7 +11,7 @@ make lint           # go vet ./...
 make clean          # Remove binary
 
 # Integration tests (requires Docker):
-make dev-up          # Start PostgreSQL 16 + MySQL 8.0 in Docker
+make dev-up          # Start PostgreSQL 16 + MySQL 8.0 + TimescaleDB in Docker
 make dev-down        # Stop containers, remove volumes
 make dev-reset       # dev-down + dev-up (clean slate)
 make test-integration # dev-up + run integration tests
@@ -32,10 +32,11 @@ go test ./internal/config/ -v -run TestValidate
 ```
 cmd/apr/main.go                          # CLI entry point, wires all components together
 dev/
-  docker-compose.yml                     # PostgreSQL 16 + MySQL 8.0 for integration tests
+  docker-compose.yml                     # PostgreSQL 16 + MySQL 8.0 + TimescaleDB for integration tests
   apr.dev.yaml                           # Dev config pointing at Docker containers
   seed/postgres/{01_schema,02_data}.sql  # Seed schema and data for PostgreSQL
   seed/mysql/{01_schema,02_data}.sql     # Seed schema and data for MySQL
+  seed/timescaledb/{01_schema,02_data}.sql # Seed schema and data for TimescaleDB (hypertable + regular table)
 integration/integration_test.go          # End-to-end tests (build tag: integration)
 internal/
   config/config.go                       # YAML config parsing, validation, defaults
@@ -45,9 +46,10 @@ internal/
     restorer.go                          # Restore: find parquet files → read → INSERT
   provider/
     database/
-      provider.go                        # DatabaseProvider + RowIterator interfaces
+      provider.go                        # DatabaseProvider + RowIterator + ChunkAwareDeleter interfaces
       postgres/postgres.go               # PostgreSQL: double-quote identifiers, $N placeholders
       mysql/mysql.go                     # MySQL: backtick identifiers, ? placeholders
+      timescaledb/timescaledb.go         # TimescaleDB: embeds Postgres, adds chunk-aware drop_chunks()
     storage/
       provider.go                        # StorageProvider interface
       filesystem/filesystem.go           # Local FS (dev/testing)
@@ -93,7 +95,7 @@ Search order: `--config` flag, `./apr.yaml`, `./apr.yml`, `~/.apr/config.yaml`, 
 
 Defaults: `batch_size=10000`, `history.path=~/.apr/history.db`, PostgreSQL `ssl_mode=prefer`.
 
-Supported storage types: `filesystem`, `s3`. Supported engines: `postgres`, `mysql`.
+Supported storage types: `filesystem`, `s3`, `r2`, `gcs`. Supported engines: `postgres`, `mysql`, `timescaledb`.
 
 Credentials resolve via `type: env` (reads env vars) or `type: static` (inline, not recommended).
 
@@ -124,7 +126,8 @@ apr version
 
 ## Conventions
 
-- **Identifier quoting**: PostgreSQL uses `"double_quotes"` with `$N` placeholders; MySQL uses `` `backticks` `` with `?` placeholders
+- **Identifier quoting**: PostgreSQL/TimescaleDB uses `"double_quotes"` with `$N` placeholders; MySQL uses `` `backticks` `` with `?` placeholders
+- **TimescaleDB**: Embeds the Postgres provider, adds `ChunkAwareDeleter` for efficient `drop_chunks()` on hypertables. Falls back to standard Postgres behavior for regular tables or when TimescaleDB extension is unavailable
 - **Errors**: Always wrap with `fmt.Errorf("context: %w", err)`
 - **File layout**: Interfaces in `provider.go`, implementations in `{engine}.go`, tests in `*_test.go` (same package)
 - **Tests**: Use `t.TempDir()` for filesystem tests, mock `database.Provider` for engine tests (see `archiver_test.go` for the mock pattern). Integration tests use `//go:build integration` tag and run against Docker containers

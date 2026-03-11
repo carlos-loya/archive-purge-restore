@@ -174,7 +174,7 @@ func (c *Config) applyDefaults() {
 		if c.Rules[i].BatchSize == 0 {
 			c.Rules[i].BatchSize = 10000
 		}
-		if c.Rules[i].Source.SSLMode == "" && c.Rules[i].Source.Engine == "postgres" {
+		if c.Rules[i].Source.SSLMode == "" && (c.Rules[i].Source.Engine == "postgres" || c.Rules[i].Source.Engine == "timescaledb") {
 			c.Rules[i].Source.SSLMode = "prefer"
 		}
 	}
@@ -255,10 +255,10 @@ func validateRule(rule Rule, index int) error {
 	}
 
 	switch rule.Source.Engine {
-	case "postgres", "mysql":
+	case "postgres", "mysql", "timescaledb":
 		// ok
 	default:
-		return fmt.Errorf("%s: unsupported engine: %s (must be postgres or mysql)", prefix, rule.Source.Engine)
+		return fmt.Errorf("%s: unsupported engine: %s (must be postgres, mysql, or timescaledb)", prefix, rule.Source.Engine)
 	}
 
 	if rule.Source.Host == "" {
