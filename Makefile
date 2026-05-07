@@ -15,7 +15,9 @@ ENVTEST_K8S_VERSION := 1.32
 .PHONY: all build build-manager test test-envtest clean lint \
 	dev-up dev-down dev-reset test-integration test-all \
 	manifests generate run-manager controller-gen envtest-tool \
-	docker-build helm-sync-crds helm-lint
+	docker-build helm-sync-crds helm-lint \
+	kind-tool kind-up kind-down kind-data-plane kind-load kind-install \
+	test-k8s test-k8s-clean
 
 all: build build-manager
 
@@ -89,6 +91,64 @@ helm-sync-crds: manifests
 
 helm-lint: helm-sync-crds
 	helm lint charts/apr
+
+##@ kind end-to-end testing
+
+KIND := $(LOCALBIN)/kind
+KIND_VERSION := v0.27.0
+KIND_CLUSTER := apr-test
+KIND_NAMESPACE := apr-system
+
+kind-tool: $(KIND)
+$(KIND):
+	mkdir -p $(LOCALBIN)
+	GOBIN=$(LOCALBIN) go install sigs.k8s.io/kind@$(KIND_VERSION)
+
+# kind-up creates a single-node cluster with NodePorts mapped to the host
+# (postgres → 15432, minio → 19000) so the integration test can reach them.
+kind-up: kind-tool
+	$(KIND) get clusters | grep -qx $(KIND_CLUSTER) || \
+		$(KIND) create cluster --name $(KIND_CLUSTER) --config dev/kind/kind-config.yaml --wait 60s
+
+# kind-down deletes the cluster.
+kind-down: kind-tool
+	$(KIND) delete cluster --name $(KIND_CLUSTER)
+
+# kind-data-plane deploys Postgres (with seed data) and MinIO (with a
+# pre-created bucket) into the cluster.
+kind-data-plane:
+	kubectl apply -f dev/kind/namespace.yaml
+	kubectl apply -f dev/kind/postgres.yaml
+	kubectl apply -f dev/kind/minio.yaml
+	kubectl -n data wait --for=condition=Available deploy/postgres deploy/minio --timeout=120s
+	kubectl -n data wait --for=condition=Complete job/minio-bucket-init --timeout=120s
+
+# kind-load builds the operator image and side-loads it into the kind node.
+kind-load: docker-build kind-tool
+	$(KIND) load docker-image $(IMG) --name $(KIND_CLUSTER)
+
+# kind-install installs the chart against the loaded image. We explicitly
+# apply CRDs first because Helm does not update them on upgrade (this
+# matches the documented Helm CRD lifecycle).
+kind-install: helm-sync-crds
+	kubectl apply -f charts/apr/crds/
+	helm upgrade --install apr ./charts/apr \
+		--namespace $(KIND_NAMESPACE) \
+		--create-namespace \
+		--set image.repository=$$(echo $(IMG) | cut -d: -f1) \
+		--set image.tag=$$(echo $(IMG) | cut -d: -f2)
+	kubectl -n $(KIND_NAMESPACE) rollout restart deploy/apr-manager -n $(KIND_NAMESPACE) 2>/dev/null || true
+	kubectl -n $(KIND_NAMESPACE) wait --for=condition=Available deploy --all --timeout=120s
+
+# test-k8s assumes the cluster + data plane + operator are already up. Run
+# `make kind-up kind-data-plane kind-load kind-install` first, or use the
+# all-in-one target test-k8s-clean below.
+test-k8s:
+	go test -tags k8s ./integration/... -v -timeout 5m
+
+# test-k8s-clean runs the full loop from a fresh cluster and tears it down.
+# Useful for CI; slower than iterating against an existing cluster.
+test-k8s-clean: kind-down kind-up kind-data-plane kind-load kind-install test-k8s kind-down
 
 ##@ Operator local run
 
