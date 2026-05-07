@@ -30,7 +30,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors" //nolint:unused // referenced in webhook smoke test
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -66,7 +66,53 @@ const (
 	// Default Helm install names (assumes `helm install apr ./charts/apr`).
 	runnerSAName    = "apr-runner"
 	runnerRoleName  = "apr-runner"
+	managerSelector = "app.kubernetes.io/name=apr,app.kubernetes.io/component=manager"
 )
+
+// TestEndToEnd_WebhookRejectsBadCRs is a smoke test that the validating
+// admission webhook is wired up and reachable. We don't replicate the
+// per-field unit-test matrix here — that lives in internal/webhook/_test.
+// We just confirm the webhook is being called at all by submitting CRs we
+// know it should reject and asserting the API server returns a Forbidden
+// admission denial (rather than the API server admitting the CR).
+func TestEndToEnd_WebhookRejectsBadCRs(t *testing.T) {
+	ctx := t.Context()
+	c := newK8sClient(t)
+	ns := setupTestNamespace(t, ctx, c)
+
+	// Bad cron expression: should be rejected by the ArchiveRule webhook.
+	bad := &aprv1alpha1.ArchiveRule{
+		ObjectMeta: metav1.ObjectMeta{Name: "bad-cron", Namespace: ns},
+		Spec: aprv1alpha1.ArchiveRuleSpec{
+			DatabaseRef: corev1.LocalObjectReference{Name: "nonexistent-dbc"},
+			StorageRef:  corev1.LocalObjectReference{Name: "nonexistent-sb"},
+			Table:       "orders",
+			DateColumn:  "created_at",
+			DaysOnline:  30,
+			Schedule:    "this is not a cron expression",
+		},
+	}
+	if err := c.Create(ctx, bad); err == nil {
+		t.Fatal("expected webhook to reject bad cron, but Create succeeded")
+	} else {
+		t.Logf("webhook correctly rejected bad cron: %v", err)
+		if !apierrors.IsInvalid(err) && !apierrors.IsForbidden(err) {
+			t.Errorf("expected Invalid or Forbidden, got %T: %v", err, err)
+		}
+	}
+
+	// RestoreRequest pointing at a missing ArchiveRule: rejected by the
+	// RestoreRequest webhook.
+	bad2 := &aprv1alpha1.RestoreRequest{
+		ObjectMeta: metav1.ObjectMeta{Name: "bad-restore", Namespace: ns},
+		Spec: aprv1alpha1.RestoreRequestSpec{
+			ArchiveRuleRef: corev1.LocalObjectReference{Name: "no-such-rule"},
+		},
+	}
+	if err := c.Create(ctx, bad2); err == nil {
+		t.Fatal("expected webhook to reject RestoreRequest with missing ArchiveRule")
+	}
+}
 
 func TestEndToEnd_ArchiveAndRestore(t *testing.T) {
 	ctx := t.Context()
@@ -145,6 +191,7 @@ func TestEndToEnd_ArchiveAndRestore(t *testing.T) {
 			initialCount, afterRestoreCount)
 	}
 }
+
 
 // --- K8s client setup ---
 

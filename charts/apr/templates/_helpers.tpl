@@ -72,3 +72,16 @@ operator's.
 {{- define "apr.runnerServiceAccountName" -}}
 {{- .Values.runner.serviceAccount.name | default "apr-runner" -}}
 {{- end -}}
+
+{{/*
+Name of the Secret that contains the webhook server's TLS material.
+When cert-manager mints the cert we control the name; otherwise the user
+provides one.
+*/}}
+{{- define "apr.webhookCertSecretName" -}}
+{{- if .Values.webhooks.certManager.enabled -}}
+{{- printf "%s-webhook-cert" (include "apr.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- required ".Values.webhooks.certSecretName is required when certManager.enabled=false" .Values.webhooks.certSecretName -}}
+{{- end -}}
+{{- end -}}

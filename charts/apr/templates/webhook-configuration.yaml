@@ -1,0 +1,75 @@
+{{- if .Values.webhooks.enabled }}
+{{- $svcName := printf "%s-webhook" (include "apr.fullname" .) -}}
+{{- $svcNs := .Release.Namespace -}}
+{{- $failurePolicy := .Values.webhooks.failurePolicy -}}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: {{ include "apr.fullname" . }}-validating-webhook
+  labels:
+    {{- include "apr.labels" . | nindent 4 }}
+  {{- if .Values.webhooks.certManager.enabled }}
+  annotations:
+    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ include "apr.fullname" . }}-webhook-cert
+  {{- end }}
+webhooks:
+  - name: varchiverule.apr.dev
+    admissionReviewVersions: [v1]
+    sideEffects: None
+    failurePolicy: {{ $failurePolicy }}
+    clientConfig:
+      service:
+        name: {{ $svcName }}
+        namespace: {{ $svcNs }}
+        path: /validate-apr-dev-v1alpha1-archiverule
+    rules:
+      - apiGroups: [apr.dev]
+        apiVersions: [v1alpha1]
+        operations: [CREATE, UPDATE]
+        resources: [archiverules]
+
+  - name: vrestorerequest.apr.dev
+    admissionReviewVersions: [v1]
+    sideEffects: None
+    failurePolicy: {{ $failurePolicy }}
+    clientConfig:
+      service:
+        name: {{ $svcName }}
+        namespace: {{ $svcNs }}
+        path: /validate-apr-dev-v1alpha1-restorerequest
+    rules:
+      - apiGroups: [apr.dev]
+        apiVersions: [v1alpha1]
+        operations: [CREATE, UPDATE]
+        resources: [restorerequests]
+
+  - name: vdatabaseconnection.apr.dev
+    admissionReviewVersions: [v1]
+    sideEffects: None
+    failurePolicy: {{ $failurePolicy }}
+    clientConfig:
+      service:
+        name: {{ $svcName }}
+        namespace: {{ $svcNs }}
+        path: /validate-apr-dev-v1alpha1-databaseconnection
+    rules:
+      - apiGroups: [apr.dev]
+        apiVersions: [v1alpha1]
+        operations: [CREATE, UPDATE]
+        resources: [databaseconnections]
+
+  - name: vstoragebackend.apr.dev
+    admissionReviewVersions: [v1]
+    sideEffects: None
+    failurePolicy: {{ $failurePolicy }}
+    clientConfig:
+      service:
+        name: {{ $svcName }}
+        namespace: {{ $svcNs }}
+        path: /validate-apr-dev-v1alpha1-storagebackend
+    rules:
+      - apiGroups: [apr.dev]
+        apiVersions: [v1alpha1]
+        operations: [CREATE, UPDATE]
+        resources: [storagebackends]
+{{- end }}

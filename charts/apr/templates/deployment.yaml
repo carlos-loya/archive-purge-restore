@@ -51,6 +51,11 @@ spec:
             {{- if .Values.log.development }}
             - --zap-devel
             {{- end }}
+            {{- if .Values.webhooks.enabled }}
+            - --enable-webhooks=true
+            - --webhook-port={{ .Values.webhooks.port }}
+            - --webhook-cert-dir=/tmp/k8s-webhook-server/serving-certs
+            {{- end }}
           ports:
             - name: metrics
               containerPort: 8080
@@ -58,6 +63,11 @@ spec:
             - name: probes
               containerPort: 8081
               protocol: TCP
+            {{- if .Values.webhooks.enabled }}
+            - name: webhook
+              containerPort: {{ .Values.webhooks.port }}
+              protocol: TCP
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /healthz
@@ -74,3 +84,16 @@ spec:
             {{- toYaml .Values.manager.containerSecurityContext | nindent 12 }}
           resources:
             {{- toYaml .Values.manager.resources | nindent 12 }}
+          {{- if .Values.webhooks.enabled }}
+          volumeMounts:
+            - name: webhook-cert
+              mountPath: /tmp/k8s-webhook-server/serving-certs
+              readOnly: true
+          {{- end }}
+      {{- if .Values.webhooks.enabled }}
+      volumes:
+        - name: webhook-cert
+          secret:
+            secretName: {{ include "apr.webhookCertSecretName" . }}
+            defaultMode: 0444
+      {{- end }}

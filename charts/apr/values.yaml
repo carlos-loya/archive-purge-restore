@@ -56,6 +56,27 @@ metricsService:
   enabled: true
   port: 8080
 
+# -- Validating admission webhooks. Disabled by default because they
+# require a TLS cert, which we mint via cert-manager when enabled. If
+# you'd rather supply your own cert (e.g. from a different issuer or
+# a long-lived Secret), set certManager.enabled=false and provide
+# certSecretName.
+webhooks:
+  enabled: false
+  port: 9443
+  failurePolicy: Fail   # Fail | Ignore — Fail is safer (rejects bad CRs)
+  certManager:
+    enabled: true
+    # Issuer kind to use. "Issuer" is namespace-scoped; "ClusterIssuer"
+    # is cluster-scoped. Self-signed Issuer in the release namespace is
+    # fine for most installs.
+    issuerKind: Issuer
+    issuerName: ""      # auto-created when empty
+  # If certManager.enabled=false, point at a pre-existing Secret with
+  # tls.crt + tls.key + ca.crt. Required keys match the cert-manager
+  # default Certificate output format.
+  certSecretName: ""
+
 # -- Selectors that schedule the manager pod. Job pods spawned by the
 # operator inherit no scheduling constraints by default.
 nodeSelector: {}

@@ -17,7 +17,7 @@ ENVTEST_K8S_VERSION := 1.32
 	manifests generate run-manager controller-gen envtest-tool \
 	docker-build helm-sync-crds helm-lint \
 	kind-tool kind-up kind-down kind-data-plane kind-load kind-install \
-	test-k8s test-k8s-clean
+	kind-cert-manager test-k8s test-k8s-clean
 
 all: build build-manager
 
@@ -97,6 +97,7 @@ helm-lint: helm-sync-crds
 KIND := $(LOCALBIN)/kind
 KIND_VERSION := v0.27.0
 KIND_CLUSTER := apr-test
+KIND_IMAGE := apr-test:dev
 KIND_NAMESPACE := apr-system
 
 kind-tool: $(KIND)
@@ -127,16 +128,27 @@ kind-data-plane:
 kind-load: docker-build kind-tool
 	$(KIND) load docker-image $(IMG) --name $(KIND_CLUSTER)
 
+# kind-cert-manager installs cert-manager into the kind cluster. The
+# operator's webhook chart depends on cert-manager (or a pre-existing
+# Secret) when webhooks.enabled=true.
+CERT_MANAGER_VERSION := v1.18.2
+kind-cert-manager:
+	kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/$(CERT_MANAGER_VERSION)/cert-manager.yaml
+	kubectl -n cert-manager wait --for=condition=Available deploy --all --timeout=180s
+
 # kind-install installs the chart against the loaded image. We explicitly
 # apply CRDs first because Helm does not update them on upgrade (this
-# matches the documented Helm CRD lifecycle).
+# matches the documented Helm CRD lifecycle). webhooks.enabled=true
+# requires cert-manager to be installed first via `make kind-cert-manager`.
+ENABLE_WEBHOOKS ?= true
 kind-install: helm-sync-crds
 	kubectl apply -f charts/apr/crds/
 	helm upgrade --install apr ./charts/apr \
 		--namespace $(KIND_NAMESPACE) \
 		--create-namespace \
 		--set image.repository=$$(echo $(IMG) | cut -d: -f1) \
-		--set image.tag=$$(echo $(IMG) | cut -d: -f2)
+		--set image.tag=$$(echo $(IMG) | cut -d: -f2) \
+		--set webhooks.enabled=$(ENABLE_WEBHOOKS)
 	kubectl -n $(KIND_NAMESPACE) rollout restart deploy/apr-manager -n $(KIND_NAMESPACE) 2>/dev/null || true
 	kubectl -n $(KIND_NAMESPACE) wait --for=condition=Available deploy --all --timeout=120s
 
@@ -148,7 +160,7 @@ test-k8s:
 
 # test-k8s-clean runs the full loop from a fresh cluster and tears it down.
 # Useful for CI; slower than iterating against an existing cluster.
-test-k8s-clean: kind-down kind-up kind-data-plane kind-load kind-install test-k8s kind-down
+test-k8s-clean: kind-down kind-up kind-cert-manager kind-data-plane kind-load kind-install test-k8s kind-down
 
 ##@ Operator local run
 
