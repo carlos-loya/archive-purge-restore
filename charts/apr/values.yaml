@@ -1,0 +1,63 @@
+# -- Container image used for both the manager Deployment and the spawned
+# archive/restore Job pods. The image must contain `/apr-manager` and `/apr`.
+image:
+  repository: ghcr.io/carlos-loya/archive-purge-restore
+  tag: "" # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# -- Number of manager replicas. Use >1 with leaderElection.enabled=true for HA.
+replicaCount: 1
+
+leaderElection:
+  enabled: false
+
+# -- Manager log verbosity (controller-runtime zap logger).
+log:
+  level: info     # debug | info | error
+  development: false
+
+manager:
+  resources:
+    limits:
+      cpu: 500m
+      memory: 256Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
+
+  # -- Address the manager binds for /metrics. Set to "0" to disable.
+  metricsBindAddress: ":8080"
+
+  # -- Address the manager binds for /healthz, /readyz.
+  healthProbeBindAddress: ":8081"
+
+  podSecurityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+
+# -- Configuration applied to every Job pod the manager spawns to run an
+# archive or restore against a CR.
+runner:
+  serviceAccount:
+    name: apr-runner
+
+# -- Service exposing the manager's /metrics endpoint. Disable if you don't
+# scrape metrics or run a separate ServiceMonitor.
+metricsService:
+  enabled: true
+  port: 8080
+
+# -- Selectors that schedule the manager pod. Job pods spawned by the
+# operator inherit no scheduling constraints by default.
+nodeSelector: {}
+tolerations: []
+affinity: {}

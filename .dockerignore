@@ -5,3 +5,8 @@
 LICENSE
 dev/
 integration/
+charts/
+docs/
+bin/
+/apr
+/apr-manager

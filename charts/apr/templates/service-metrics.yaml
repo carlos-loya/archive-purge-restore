@@ -1,0 +1,20 @@
+{{- if .Values.metricsService.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "apr.fullname" . }}-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "apr.labels" . | nindent 4 }}
+    app.kubernetes.io/component: manager
+spec:
+  type: ClusterIP
+  ports:
+    - name: metrics
+      port: {{ .Values.metricsService.port }}
+      targetPort: metrics
+      protocol: TCP
+  selector:
+    {{- include "apr.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: manager
+{{- end }}
