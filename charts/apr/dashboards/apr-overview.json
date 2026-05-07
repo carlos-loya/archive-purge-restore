@@ -1,0 +1,175 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {"type": "datasource", "uid": "grafana"},
+        "enable": true,
+        "hide": true,
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "title": "APR — Archive-Purge-Restore Overview",
+  "description": "Operational dashboard for the APR operator: archive run health, restore activity, storage backend latency, and reconcile error rates.",
+  "tags": ["apr", "kubernetes", "operator"],
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "timezone": "browser",
+  "time": {"from": "now-6h", "to": "now"},
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {"text": "Prometheus", "value": "Prometheus"}
+      },
+      {
+        "name": "rule",
+        "type": "query",
+        "datasource": {"type": "prometheus", "uid": "${datasource}"},
+        "query": "label_values(apr_archive_runs_total, rule)",
+        "multi": true,
+        "includeAll": true,
+        "current": {"text": "All", "value": "$__all"}
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Archive runs (1h)",
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {
+          "expr": "sum(increase(apr_archive_runs_total{rule=~\"$rule\",result=\"success\"}[1h]))",
+          "legendFormat": "succeeded"
+        },
+        {
+          "expr": "sum(increase(apr_archive_runs_total{rule=~\"$rule\",result=\"failure\"}[1h]))",
+          "legendFormat": "failed"
+        }
+      ],
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}}}
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Rows archived (1h)",
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {
+          "expr": "sum(increase(apr_archive_rows_total{rule=~\"$rule\"}[1h]))",
+          "legendFormat": "rows"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Restore runs (1h)",
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {
+          "expr": "sum(increase(apr_restore_runs_total{rule=~\"$rule\",result=\"success\"}[1h]))",
+          "legendFormat": "succeeded"
+        },
+        {
+          "expr": "sum(increase(apr_restore_runs_total{rule=~\"$rule\",result=\"failure\"}[1h]))",
+          "legendFormat": "failed"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Reconcile errors (1h)",
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {
+          "expr": "sum(increase(controller_runtime_reconcile_total{result=\"error\"}[1h]))",
+          "legendFormat": "errors"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Archive run rate by rule",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {
+          "expr": "sum by (rule, result) (rate(apr_archive_runs_total{rule=~\"$rule\"}[5m]))",
+          "legendFormat": "{{`{{rule}}`}} ({{`{{result}}`}})"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Archive run duration p50 / p99",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {"defaults": {"unit": "s"}},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (rule, le) (rate(apr_archive_run_duration_seconds_bucket{rule=~\"$rule\"}[10m])))",
+          "legendFormat": "p50 {{`{{rule}}`}}"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (rule, le) (rate(apr_archive_run_duration_seconds_bucket{rule=~\"$rule\"}[10m])))",
+          "legendFormat": "p99 {{`{{rule}}`}}"
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Storage operation duration p99 by backend & operation",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {"defaults": {"unit": "s"}},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum by (type, operation, le) (rate(apr_storage_operation_duration_seconds_bucket[5m])))",
+          "legendFormat": "{{`{{type}}`}} {{`{{operation}}`}}"
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Storage failure rate",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {
+          "expr": "sum by (type, operation) (rate(apr_storage_operation_duration_seconds_count{result=\"failure\"}[5m]))",
+          "legendFormat": "{{`{{type}}`}} {{`{{operation}}`}}"
+        }
+      ]
+    },
+    {
+      "id": 30,
+      "type": "timeseries",
+      "title": "Reconcile rate by controller / result",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 20},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {
+          "expr": "sum by (controller, result) (rate(controller_runtime_reconcile_total[5m]))",
+          "legendFormat": "{{`{{controller}}`}} ({{`{{result}}`}})"
+        }
+      ]
+    }
+  ]
+}

@@ -97,6 +97,11 @@ func (r *RestoreRequestReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return r.markFailed(ctx, &rr, ReasonJobReconcileError, err.Error())
 	}
 
+	// Emit restore_runs_total / duration / rows metrics on terminal Jobs.
+	if err := emitRestoreMetricsForJob(ctx, r.Client, &rr, job); err != nil {
+		logger.Error(err, "emitting restore metrics")
+	}
+
 	// Reflect Job state into Phase. The sink writes RowsRestored / times
 	// directly from inside the pod; we only manage Phase and JobRef here.
 	r.applyJobStatus(&rr, job)

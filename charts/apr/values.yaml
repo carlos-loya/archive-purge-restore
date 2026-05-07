@@ -56,6 +56,21 @@ metricsService:
   enabled: true
   port: 8080
 
+# -- Prometheus integration. When enabled, ships a ServiceMonitor that
+# Prometheus Operator picks up automatically. Requires the Prometheus
+# Operator CRDs to be installed in the cluster (kube-prometheus-stack
+# or similar).
+prometheus:
+  enabled: false
+  serviceMonitor:
+    # interval and scrapeTimeout follow Prometheus defaults if empty.
+    interval: 30s
+    scrapeTimeout: 10s
+    # Extra labels added to the ServiceMonitor object. Prometheus
+    # Operator typically requires a label like `release: kube-prom-stack`
+    # to discover ServiceMonitors — set that here.
+    labels: {}
+
 # -- Validating admission webhooks. Disabled by default because they
 # require a TLS cert, which we mint via cert-manager when enabled. If
 # you'd rather supply your own cert (e.g. from a different issuer or

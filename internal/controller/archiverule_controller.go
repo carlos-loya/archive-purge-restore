@@ -100,6 +100,14 @@ func (r *ArchiveRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	r.applyJobStatus(&rule, active, lastFinished)
 	rule.Status.ConsecutiveFailures = countConsecutiveFailures(ownedJobs)
 
+	// Emit archive_runs_total / duration / rows metrics the first time we
+	// see this finished Job. Done before we update the rule's status so a
+	// failed annotation patch surfaces as an error here rather than
+	// silently masking later steps.
+	if err := emitArchiveMetricsForJob(ctx, r.Client, &rule, lastFinished); err != nil {
+		logger.Error(err, "emitting archive metrics")
+	}
+
 	// Garbage-collect old Jobs.
 	if err := r.pruneJobs(ctx, &rule, ownedJobs); err != nil {
 		logger.Error(err, "pruning old Jobs")

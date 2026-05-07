@@ -37,6 +37,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlconfig "sigs.k8s.io/controller-runtime/pkg/client/config"
 
@@ -190,8 +191,95 @@ func TestEndToEnd_ArchiveAndRestore(t *testing.T) {
 		t.Errorf("expected restore to bring count back to %d, got %d",
 			initialCount, afterRestoreCount)
 	}
+
+	// Phase 7: now that the operator has observed both a successful
+	// archive Job and a successful restore Job, scrape the manager's
+	// /metrics endpoint and assert the APR counters reflect the run.
+	// We poll because the metrics-emission watermark is set in a
+	// separate reconcile from the one that updated the rule's status.
+	assertMetricsExposed(t, ctx, 30*time.Second)
 }
 
+// assertMetricsExposed scrapes /metrics via the apiserver proxy and
+// confirms the APR-specific collectors and at least one expected sample
+// have shown up. The proxy approach avoids needing a port-forward from
+// the test process.
+func assertMetricsExposed(t *testing.T, ctx context.Context, timeout time.Duration) {
+	t.Helper()
+	cfg, err := ctrlconfig.GetConfig()
+	if err != nil {
+		t.Fatalf("loading kubeconfig: %v", err)
+	}
+	clientset, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		t.Fatalf("kubernetes client: %v", err)
+	}
+
+	mustContainNames := []string{
+		"apr_archive_runs_total",
+		"apr_archive_run_duration_seconds",
+		"apr_archive_rows_total",
+		"apr_restore_runs_total",
+		"controller_runtime_reconcile_total",
+	}
+	mustContainSamples := []string{
+		`apr_archive_runs_total{result="success"`,
+		`apr_restore_runs_total{result="success"`,
+	}
+
+	deadline := time.Now().Add(timeout)
+	var body []byte
+	for time.Now().Before(deadline) {
+		body, err = clientset.CoreV1().Services("apr-system").
+			ProxyGet("http", "apr-metrics", "8080", "/metrics", nil).
+			DoRaw(ctx)
+		if err != nil {
+			t.Fatalf("scraping /metrics via apiserver proxy: %v", err)
+		}
+		text := string(body)
+		allFound := true
+		for _, want := range mustContainNames {
+			if !strings.Contains(text, want) {
+				allFound = false
+				break
+			}
+		}
+		if allFound {
+			for _, want := range mustContainSamples {
+				if !strings.Contains(text, want) {
+					allFound = false
+					break
+				}
+			}
+		}
+		if allFound {
+			t.Logf("scraped %d bytes from /metrics; all expected names + samples present", len(body))
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("ctx cancelled while waiting for metrics: %v", ctx.Err())
+		case <-time.After(2 * time.Second):
+		}
+	}
+	t.Fatalf("/metrics did not include expected APR samples within %s; body excerpt:\n%s",
+		timeout, firstNLines(string(body), 40))
+}
+
+func firstNLines(s string, n int) string {
+	out := []byte{}
+	count := 0
+	for _, b := range []byte(s) {
+		out = append(out, b)
+		if b == '\n' {
+			count++
+			if count >= n {
+				break
+			}
+		}
+	}
+	return string(out)
+}
 
 // --- K8s client setup ---
 

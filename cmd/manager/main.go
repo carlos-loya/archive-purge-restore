@@ -26,11 +26,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	webhookserver "sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	aprv1alpha1 "github.com/carlos-loya/archive-purge-restore/api/v1alpha1"
 	"github.com/carlos-loya/archive-purge-restore/internal/controller"
+	aprmetrics "github.com/carlos-loya/archive-purge-restore/internal/metrics"
 	aprwebhook "github.com/carlos-loya/archive-purge-restore/internal/webhook"
 )
 
@@ -43,6 +45,12 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(aprv1alpha1.AddToScheme(scheme))
+
+	// Register APR's custom Prometheus collectors with controller-runtime's
+	// metrics registry. They'll be exposed alongside the standard
+	// controller_runtime_*, workqueue_*, and rest_client_* metrics on the
+	// manager's /metrics endpoint.
+	aprmetrics.MustRegister(ctrlmetrics.Registry)
 }
 
 func main() {
