@@ -1,3 +1,10 @@
+# APR YAML configuration — for the standalone CLI / `apr daemon` mode.
+#
+# When running APR on Kubernetes, you don't write this file: declare your
+# data plane via DatabaseConnection / StorageBackend / ArchiveRule custom
+# resources instead. See docs/install.md and docs/examples/ for the K8s
+# equivalents.
+
 storage:
   type: filesystem
   filesystem:

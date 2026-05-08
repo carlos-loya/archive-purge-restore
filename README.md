@@ -1,154 +1,202 @@
 # APR — Archive, Purge, Restore
 
-**Stop paying to store rows nobody reads.** APR moves old database rows to cheap object storage as compact Parquet files, deletes them from your database, and brings them back with a single command when you need them.
+**Kubernetes-native database row archival.** APR is a Kubernetes operator
+(with a CLI for non-K8s use) that archives old database rows to cheap
+object storage as Parquet files, deletes them from the source, and brings
+them back on demand.
 
+```yaml
+apiVersion: apr.dev/v1alpha1
+kind: ArchiveRule
+metadata: { name: orders-archive, namespace: data }
+spec:
+  databaseRef: { name: orders-db }
+  storageRef:  { name: archive-bucket }
+  table: orders
+  dateColumn: created_at
+  daysOnline: 90
+  schedule: "0 2 * * *"
 ```
-apr archive prod-orders      # Archive old rows → Parquet on S3
-apr restore --rule prod-orders --date 2024-06-15   # Bring them back
+
+```text
+$ kubectl get archiverule orders-archive
+NAME             TABLE    SCHEDULE    DAYS-ONLINE   LAST-RESULT   ROWS-ARCHIVED   NEXT-RUN
+orders-archive   orders   0 2 * * *   90            Succeeded     14823           2026-05-09T02:00:00Z
 ```
 
 ## Why APR?
 
-- **Shrink your database** — archive rows past their retention window without losing them forever
-- **Parquet format** — columnar, compressed, and readable by every data tool (Spark, DuckDB, pandas, Athena)
-- **Zero-downtime** — two-phase archive ensures no data loss: rows are only deleted after successful upload
-- **Composite key support** — handles single and multi-column primary keys out of the box
-- **Daemon mode** — set cron schedules per rule and let it run unattended
-- **Full audit trail** — every archive and restore is logged with run IDs, row counts, and timestamps
+- **Declarative** — define your archive policy once in YAML; the operator enforces it forever
+- **Kubernetes-native** — CRDs, in-controller scheduling, validating admission webhooks, Prometheus metrics, one `helm install`
+- **Parquet output** — columnar and compressed, queryable directly by Spark, DuckDB, pandas, Athena, BigQuery
+- **Zero-downtime** — two-phase archive guarantees no data loss (delete only after successful upload)
+- **Multi-database** — PostgreSQL, MySQL, TimescaleDB (with chunk-aware `drop_chunks()`)
+- **Multi-storage** — AWS S3, Google Cloud Storage, Cloudflare R2, local filesystem
+- **CLI fallback** — same engine, same algorithm, runs without Kubernetes
 
-## Supported Databases & Storage
+## Supported databases & storage
 
 | Databases | Storage backends |
-|-----------|-----------------|
+|---|---|
 | PostgreSQL | AWS S3 |
-| MySQL | Google Cloud Storage (GCS) |
+| MySQL | Google Cloud Storage |
 | TimescaleDB | Cloudflare R2 |
-| | Local filesystem |
+|  | Local filesystem |
 
-## Quick Start
+## Install (Kubernetes)
 
-### Install
+```bash
+helm install apr ./charts/apr \
+  --namespace apr-system \
+  --create-namespace \
+  --set webhooks.enabled=true     # requires cert-manager in-cluster
+```
+
+Then declare your data plane:
+
+```yaml
+# Reusable handles — referenced by ArchiveRules and RestoreRequests.
+apiVersion: apr.dev/v1alpha1
+kind: DatabaseConnection
+metadata: { name: orders-db, namespace: data }
+spec:
+  engine: postgres
+  host: orders.svc.cluster.local
+  port: 5432
+  database: orders
+  credentialsSecretRef: { name: orders-creds }
+---
+apiVersion: apr.dev/v1alpha1
+kind: StorageBackend
+metadata: { name: archive-bucket, namespace: data }
+spec:
+  type: s3
+  bucket: company-archive
+  region: us-west-2
+  credentialsSecretRef: { name: archive-creds }
+---
+# Recurring archive on a cron schedule.
+apiVersion: apr.dev/v1alpha1
+kind: ArchiveRule
+metadata: { name: orders-archive, namespace: data }
+spec:
+  databaseRef: { name: orders-db }
+  storageRef:  { name: archive-bucket }
+  table: orders
+  dateColumn: created_at
+  daysOnline: 90
+  schedule: "0 2 * * *"
+```
+
+`kubectl apply -f ...` and the operator takes over: it reconciles each
+rule, spawns archive `Job`s on the configured cron schedule (no
+`CronJob` indirection — the controller owns the cron loop itself),
+writes results back to `status`, and exposes Prometheus metrics.
+
+**Trigger an immediate run** without waiting for the next schedule:
+
+```bash
+kubectl annotate archiverule orders-archive \
+  apr.dev/trigger-time=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+```
+
+**Restore** archived rows back to the database:
+
+```yaml
+apiVersion: apr.dev/v1alpha1
+kind: RestoreRequest
+metadata: { name: restore-2024-06-15, namespace: data }
+spec:
+  archiveRuleRef: { name: orders-archive }
+  date: "2024-06-15"
+```
+
+Full walkthrough: [docs/install.md](docs/install.md). Sample CRs:
+[docs/examples/](docs/examples/). Architecture rationale:
+[docs/kubernetes-operator-plan.md](docs/kubernetes-operator-plan.md).
+
+## Custom resources
+
+| Kind | What it is |
+|---|---|
+| `DatabaseConnection` | Reusable handle to a database; many rules can reference one DBC |
+| `StorageBackend` | Reusable handle to an object-storage destination |
+| `ArchiveRule` | Declarative recurring archive: table + cron + DBC + SB |
+| `RestoreRequest` | One-shot restore from an existing archive (immutable spec) |
+
+## Validating webhooks
+
+When `webhooks.enabled=true` (requires cert-manager), the operator
+rejects misconfigured CRs at `kubectl apply` time with field-pathed
+errors:
+
+```text
+$ kubectl apply -f bad-rule.yaml
+Error from server (Forbidden): admission webhook "varchiverule.apr.dev" denied the request:
+  [spec.schedule: Invalid value: "garbage": invalid cron expression: expected exactly 5 fields,
+   spec.databaseRef.name: Not found: "missing-dbc"]
+```
+
+## Observability
+
+The manager pod exposes a `/metrics` endpoint with both standard
+controller-runtime metrics (`controller_runtime_*`, `workqueue_*`,
+`rest_client_*`) and APR-specific collectors:
+
+| Metric | Type |
+|---|---|
+| `apr_archive_runs_total{rule, result}` | counter |
+| `apr_archive_run_duration_seconds{rule}` | histogram |
+| `apr_archive_rows_total{rule}` | counter |
+| `apr_restore_runs_total{rule, result}` | counter |
+| `apr_restore_run_duration_seconds{rule}` | histogram |
+| `apr_restore_rows_total{rule}` | counter |
+| `apr_storage_operation_duration_seconds{type, operation, result}` | histogram |
+
+Set `prometheus.enabled=true` to ship a `ServiceMonitor` for the
+Prometheus Operator. A starter Grafana dashboard lives at
+[`charts/apr/dashboards/apr-overview.json`](charts/apr/dashboards/apr-overview.json).
+
+## CLI mode (non-Kubernetes use)
+
+The same `apr` binary runs against a YAML config when Kubernetes isn't
+available:
 
 ```bash
 go install github.com/carlos-loya/archive-purge-restore/cmd/apr@latest
-```
 
-Or build from source:
-
-```bash
-git clone https://github.com/carlos-loya/archive-purge-restore.git
-cd archive-purge-restore
-make build    # → ./apr
-```
-
-### Configure
-
-Create `apr.yaml`:
-
-```yaml
-storage:
-  type: s3
-  s3:
-    bucket: my-archive-bucket
-    region: us-east-1
-
-rules:
-  - name: prod-orders
-    schedule: "0 2 * * *"          # 2 AM daily
-    batch_size: 10000
-    source:
-      engine: postgres
-      host: db.example.com
-      port: 5432
-      database: production
-      credentials:
-        type: env
-        username_env: DB_USER
-        password_env: DB_PASS
-    tables:
-      - name: orders
-        date_column: created_at
-        days_online: 90
-      - name: order_items
-        date_column: created_at
-        days_online: 90
-```
-
-```bash
-apr validate    # Check your config
-```
-
-**TimescaleDB** hypertables are also supported — use `engine: timescaledb` to enable chunk-aware deletion via `drop_chunks()`:
-
-```yaml
-rules:
-  - name: iot-metrics
-    schedule: "0 0 * * *"
-    source:
-      engine: timescaledb
-      host: tsdb.example.com
-      port: 5432
-      database: metrics
-      credentials:
-        type: env
-        username_env: TSDB_USER
-        password_env: TSDB_PASS
-    tables:
-      - name: sensor_data
-        date_column: time
-        days_online: 7
-```
-
-### Run
-
-```bash
-# One-off archive
-apr archive prod-orders
-
-# Run as a daemon (uses cron schedules from config)
-apr daemon
-
-# Restore archived data
-apr restore --rule prod-orders --table orders --date 2024-06-15
-
-# View execution history
+apr archive prod-orders                                      # one-off
+apr daemon                                                   # built-in scheduler
+apr restore --rule prod-orders --date 2024-06-15
 apr history --rule prod-orders
 ```
 
-## How It Works
+See [`apr.yaml.example`](apr.yaml.example) for the YAML config schema.
 
-1. **Extract** — query rows older than `days_online` in batches, write each batch to a `.pending` Parquet file
+## How it works
+
+1. **Extract** — query rows older than `daysOnline` in batches; write each batch to a `.pending` Parquet file
 2. **Delete** — remove archived rows from the source database by primary key
-3. **Finalize** — rename `.pending` files to their final path (data is only committed after successful deletion)
-4. **On failure** — all `.pending` files are cleaned up, no rows are deleted
+3. **Finalize** — atomically rename `.pending` → final path (data is committed only after successful deletion)
+4. **On failure** — all `.pending` files are cleaned up; no rows are deleted from the source
 
 Archives are stored at `{database}/{table}/{date}/{runID}_{batch}.parquet`.
-
-## CLI Reference
-
-```
-apr daemon                        Run scheduler with all rules
-apr archive [rule]                Archive all rules, or a specific rule
-apr restore --rule R [flags]      Restore archived data
-      --table T                   Specific table (default: all)
-      --date YYYY-MM-DD           Specific date
-      --run-id ID                 Specific run ID
-apr history [--rule R] [--limit N] View execution history
-apr validate                      Validate config file
-apr version                       Print version
-```
 
 ## Development
 
 ```bash
-make build              # Build binary
+make build              # CLI binary           → ./apr
+make build-manager      # Operator binary      → ./apr-manager
 make test               # Unit tests
 make lint               # go vet
-
-# Integration tests (requires Docker)
-make test-integration   # Spins up PostgreSQL + MySQL, runs end-to-end tests
-make dev-down           # Tear down containers
+make test-envtest       # Reconciler envtest suite (real apiserver, no cluster)
+make test-integration   # Engine integration against Docker Postgres + MySQL + TimescaleDB
+make test-k8s-clean     # Full kind end-to-end: cert-manager + Postgres + MinIO + chart + assertions
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development
+workflow including adding new validators, metrics, reconcilers, database
+engines, and storage backends.
 
 ## License
 
