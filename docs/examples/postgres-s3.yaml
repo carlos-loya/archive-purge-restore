@@ -1,0 +1,72 @@
+# Production-style example: archive a Postgres `orders` table to an S3
+# bucket on a nightly cron. Restores read from the same bucket.
+#
+# Apply with:
+#   kubectl create namespace data
+#   kubectl apply -f docs/examples/postgres-s3.yaml
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: orders-db-credentials
+  namespace: data
+type: Opaque
+stringData:
+  username: archiver
+  # Use a least-privilege user that has SELECT + DELETE on the archive
+  # tables and INSERT for the restore path. NEVER ship a real password in
+  # source — this is for example purposes only.
+  password: change-me
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: archive-bucket-credentials
+  namespace: data
+type: Opaque
+stringData:
+  access_key_id: AKIAEXAMPLEKEY
+  secret_access_key: change-me
+---
+apiVersion: apr.dev/v1alpha1
+kind: DatabaseConnection
+metadata:
+  name: orders-db
+  namespace: data
+spec:
+  engine: postgres
+  host: orders-prod.cluster-abc123.us-west-2.rds.amazonaws.com
+  port: 5432
+  database: orders
+  sslMode: require
+  credentialsSecretRef:
+    name: orders-db-credentials
+---
+apiVersion: apr.dev/v1alpha1
+kind: StorageBackend
+metadata:
+  name: archive-bucket
+  namespace: data
+spec:
+  type: s3
+  bucket: company-archive
+  region: us-west-2
+  prefix: orders/
+  credentialsSecretRef:
+    name: archive-bucket-credentials
+---
+apiVersion: apr.dev/v1alpha1
+kind: ArchiveRule
+metadata:
+  name: orders-archive
+  namespace: data
+spec:
+  databaseRef:
+    name: orders-db
+  storageRef:
+    name: archive-bucket
+  table: orders
+  dateColumn: created_at
+  daysOnline: 90
+  schedule: "0 2 * * *"
+  batchSize: 10000

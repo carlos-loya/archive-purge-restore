@@ -1,0 +1,47 @@
+{{/*
+ClusterRole for the operator manager. The rules in this template MUST stay
+in sync with config/rbac/role.yaml, which is the source of truth (generated
+from kubebuilder markers). To regenerate the source: `make manifests`.
+*/}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "apr.fullname" . }}-manager
+  labels:
+    {{- include "apr.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get, list, watch]
+  - apiGroups: [apr.dev]
+    resources:
+      - archiverules
+      - databaseconnections
+      - restorerequests
+      - storagebackends
+    verbs: [create, delete, get, list, patch, update, watch]
+  - apiGroups: [apr.dev]
+    resources:
+      - archiverules/finalizers
+      - databaseconnections/finalizers
+      - restorerequests/finalizers
+      - storagebackends/finalizers
+    verbs: [update]
+  - apiGroups: [apr.dev]
+    resources:
+      - archiverules/status
+      - databaseconnections/status
+      - restorerequests/status
+      - storagebackends/status
+    verbs: [get, patch, update]
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [create, delete, get, list, patch, update, watch]
+{{- if .Values.leaderElection.enabled }}
+  - apiGroups: ["coordination.k8s.io"]
+    resources: [leases]
+    verbs: [create, get, update]
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, patch]
+{{- end }}

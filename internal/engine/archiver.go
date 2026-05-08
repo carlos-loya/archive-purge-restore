@@ -62,6 +62,12 @@ func NewArchiver(store storage.Provider, logger *slog.Logger) *Archiver {
 }
 
 // Archive runs the archive process for a single rule.
+//
+// Note: metrics for archive runs are emitted by the operator's reconciler
+// (when it observes a finished Job), not from inside the engine. The
+// engine runs inside short-lived Job pods that don't expose /metrics, so
+// in-pod observations would be discarded at exit. Recording at the
+// long-lived manager process gives Prometheus a stable scrape target.
 func (a *Archiver) Archive(ctx context.Context, rule config.Rule, db database.Provider) (*RunResult, error) {
 	runID := uuid.New().String()[:8]
 	result := &RunResult{

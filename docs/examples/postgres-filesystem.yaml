@@ -1,0 +1,70 @@
+# Minimal example: archive a Postgres `orders` table to a local PVC, then
+# restore from it on demand. Suitable as a smoke test against an in-cluster
+# Postgres (e.g. Bitnami's Helm chart) and a hostPath / PVC mount.
+#
+# Apply with:
+#   kubectl create namespace data
+#   kubectl apply -f docs/examples/postgres-filesystem.yaml
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: orders-db-credentials
+  namespace: data
+type: Opaque
+stringData:
+  username: postgres
+  password: postgres
+---
+apiVersion: apr.dev/v1alpha1
+kind: DatabaseConnection
+metadata:
+  name: orders-db
+  namespace: data
+spec:
+  engine: postgres
+  host: postgres.data.svc.cluster.local
+  port: 5432
+  database: orders
+  sslMode: disable
+  credentialsSecretRef:
+    name: orders-db-credentials
+---
+apiVersion: apr.dev/v1alpha1
+kind: StorageBackend
+metadata:
+  name: archive-pvc
+  namespace: data
+spec:
+  type: filesystem
+  # NOTE: every archive Job pod expects this path to exist and be writable.
+  # Mount a PVC at this path via a future "spec.volumes" extension, or use
+  # an emptyDir for ephemeral testing.
+  bucket: /var/archives
+---
+apiVersion: apr.dev/v1alpha1
+kind: ArchiveRule
+metadata:
+  name: orders-archive
+  namespace: data
+spec:
+  databaseRef:
+    name: orders-db
+  storageRef:
+    name: archive-pvc
+  table: orders
+  dateColumn: created_at
+  daysOnline: 90
+  schedule: "0 2 * * *"
+---
+# Apply this only when you want to restore. Each RestoreRequest is one-shot
+# — to re-run, create a new CR with a different name.
+apiVersion: apr.dev/v1alpha1
+kind: RestoreRequest
+metadata:
+  name: restore-orders-2026-04-01
+  namespace: data
+spec:
+  archiveRuleRef:
+    name: orders-archive
+  date: "2026-04-01"

@@ -199,6 +199,9 @@ func archiveCmd() *cobra.Command {
 		Long:  "Run the archive process for all rules, or a specific rule by name.",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if fromCR, _ := cmd.Flags().GetString("from-cr"); fromCR != "" {
+				return runArchiveFromCR(cmd, fromCR)
+			}
 			cfg, err := loadConfig()
 			if err != nil {
 				return fmt.Errorf("loading config: %w", err)
@@ -288,6 +291,7 @@ func archiveCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().Bool("dry-run", false, "Preview what would be archived without making changes")
+	cmd.Flags().String("from-cr", "", "Run against a Kubernetes ArchiveRule CR (<namespace>/<name>) instead of YAML config")
 	return cmd
 }
 
@@ -296,6 +300,9 @@ func restoreCmd() *cobra.Command {
 		Use:   "restore",
 		Short: "Restore archived data back to the database",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if fromCR, _ := cmd.Flags().GetString("from-cr"); fromCR != "" {
+				return runRestoreFromCR(cmd, fromCR)
+			}
 			cfg, err := loadConfig()
 			if err != nil {
 				return fmt.Errorf("loading config: %w", err)
@@ -361,11 +368,12 @@ func restoreCmd() *cobra.Command {
 			return restoreErr
 		},
 	}
-	cmd.Flags().String("rule", "", "Rule name to restore from (required)")
+	cmd.Flags().String("rule", "", "Rule name to restore from (required unless --from-cr is set)")
 	cmd.Flags().String("table", "", "Table name to restore (optional, all tables if empty)")
 	cmd.Flags().String("date", "", "Date of archived data (YYYY-MM-DD)")
 	cmd.Flags().String("run-id", "", "Specific run ID to restore")
 	cmd.Flags().Bool("dry-run", false, "Preview what would be restored without making changes")
+	cmd.Flags().String("from-cr", "", "Run against a Kubernetes RestoreRequest CR (<namespace>/<name>) instead of YAML config")
 	return cmd
 }
 

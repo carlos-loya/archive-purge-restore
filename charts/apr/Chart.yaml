@@ -1,0 +1,24 @@
+apiVersion: v2
+name: apr
+description: |
+  APR (Archive-Purge-Restore) operator. Reconciles ArchiveRule and
+  RestoreRequest custom resources into Kubernetes CronJobs and Jobs that
+  archive old database rows to object storage and restore them on demand.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.28.0-0"
+keywords:
+  - database
+  - archive
+  - postgres
+  - mysql
+  - timescaledb
+  - parquet
+  - operator
+home: https://github.com/carlos-loya/archive-purge-restore
+sources:
+  - https://github.com/carlos-loya/archive-purge-restore
+maintainers:
+  - name: Carlos Loya
+    url: https://github.com/carlos-loya

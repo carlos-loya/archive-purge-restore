@@ -1,0 +1,43 @@
+domain: apr.dev
+layout:
+- go.kubebuilder.io/v4
+projectName: archive-purge-restore
+repo: github.com/carlos-loya/archive-purge-restore
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: apr.dev
+  group: apr
+  kind: DatabaseConnection
+  path: github.com/carlos-loya/archive-purge-restore/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: apr.dev
+  group: apr
+  kind: StorageBackend
+  path: github.com/carlos-loya/archive-purge-restore/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: apr.dev
+  group: apr
+  kind: ArchiveRule
+  path: github.com/carlos-loya/archive-purge-restore/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: apr.dev
+  group: apr
+  kind: RestoreRequest
+  path: github.com/carlos-loya/archive-purge-restore/api/v1alpha1
+  version: v1alpha1
+version: "3"

@@ -55,6 +55,7 @@ func NewRestorer(store storage.Provider, logger *slog.Logger) *Restorer {
 }
 
 // Restore reads archived Parquet files and inserts the data back into the database.
+// Metrics are emitted by the operator's reconciler — see Archive's comment.
 func (r *Restorer) Restore(ctx context.Context, opts RestoreOptions, db database.Provider) (*RestoreResult, error) {
 	result := &RestoreResult{
 		Rule:      opts.Rule.Name,

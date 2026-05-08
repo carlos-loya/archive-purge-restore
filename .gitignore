@@ -1,4 +1,6 @@
 /apr
+/apr-manager
+/bin/
 *.exe
 *.test
 *.out

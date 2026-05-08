@@ -1,0 +1,23 @@
+{{/*
+Narrow ClusterRole for archive/restore Job pods. These pods only need to
+read CRs and patch their own status — much less than the manager.
+*/}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "apr.fullname" . }}-runner
+  labels:
+    {{- include "apr.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [apr.dev]
+    resources:
+      - archiverules
+      - databaseconnections
+      - storagebackends
+      - restorerequests
+    verbs: [get, list]
+  - apiGroups: [apr.dev]
+    resources:
+      - archiverules/status
+      - restorerequests/status
+    verbs: [get, patch, update]

@@ -1,0 +1,31 @@
+{{- if and .Values.webhooks.enabled .Values.webhooks.certManager.enabled }}
+{{- if not .Values.webhooks.certManager.issuerName }}
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ include "apr.fullname" . }}-webhook-issuer
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "apr.labels" . | nindent 4 }}
+spec:
+  selfSigned: {}
+---
+{{- end }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "apr.fullname" . }}-webhook-cert
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "apr.labels" . | nindent 4 }}
+spec:
+  secretName: {{ include "apr.webhookCertSecretName" . }}
+  dnsNames:
+    - {{ include "apr.fullname" . }}-webhook
+    - {{ include "apr.fullname" . }}-webhook.{{ .Release.Namespace }}
+    - {{ include "apr.fullname" . }}-webhook.{{ .Release.Namespace }}.svc
+    - {{ include "apr.fullname" . }}-webhook.{{ .Release.Namespace }}.svc.cluster.local
+  issuerRef:
+    kind: {{ .Values.webhooks.certManager.issuerKind }}
+    name: {{ .Values.webhooks.certManager.issuerName | default (printf "%s-webhook-issuer" (include "apr.fullname" .)) }}
+{{- end }}
