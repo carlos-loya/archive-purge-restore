@@ -1,0 +1,53 @@
+# golangci-lint configuration. See https://golangci-lint.run/usage/configuration/
+#
+# Linter set is intentionally small: the default "errcheck, gosimple, govet,
+# ineffassign, staticcheck, unused" plus misspell and gofmt for hygiene.
+# Adding more linters past this point tends to generate noise without
+# catching real bugs in this codebase.
+
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard
+  enable:
+    - misspell
+  settings:
+    errcheck:
+      # Standard-library cleanup patterns where discarding the error is
+      # the documented Go idiom (tx.Rollback after commit returns
+      # sql.ErrTxDone; *Rows.Close on a fully-iterated result is a no-op).
+      # All other ignored returns must be explicit `_ =` at the call site.
+      exclude-functions:
+        - (*database/sql.DB).Close
+        - (*database/sql.Tx).Rollback
+        - (*database/sql.Rows).Close
+        - (*database/sql.Stmt).Close
+        - os.Remove
+  exclusions:
+    rules:
+      # Generated DeepCopy methods should not be linted; they're owned by
+      # controller-gen.
+      - path: zz_generated.*\.go
+        linters:
+          - errcheck
+          - staticcheck
+          - unused
+      # Test files routinely shadow err and call helpers in ways that trip
+      # errcheck without payoff.
+      - path: _test\.go
+        linters:
+          - errcheck
+      # api/v1alpha1 follows the kubebuilder-generated SchemeBuilder
+      # pattern; the staticcheck SA1019 deprecation specifically exempts
+      # api packages (see linter message: "useful in api packages").
+      - path: api/v1alpha1/groupversion_info\.go
+        linters:
+          - staticcheck
+        text: "SA1019.*scheme.Builder"
+
+formatters:
+  enable:
+    - gofmt

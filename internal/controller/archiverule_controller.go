@@ -388,7 +388,7 @@ func (r *ArchiveRuleReconciler) applyJobStatus(rule *aprv1alpha1.ArchiveRule, ac
 	if lastFinished != nil {
 		rule.Status.LastJobRef = &corev1.LocalObjectReference{Name: lastFinished.Name}
 		if !didJobSucceed(lastFinished) && lastFinished.Status.StartTime != nil &&
-			(rule.Status.LastRunTime == nil || lastFinished.Status.StartTime.Time.After(rule.Status.LastRunTime.Time)) {
+			(rule.Status.LastRunTime == nil || lastFinished.Status.StartTime.After(rule.Status.LastRunTime.Time)) {
 			rule.Status.LastRunTime = lastFinished.Status.StartTime
 		}
 	}

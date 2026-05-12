@@ -6,3 +6,6 @@
 *.out
 .env
 vendor/
+
+# Local Claude Code tooling artifacts
+.claude/

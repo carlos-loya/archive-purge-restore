@@ -170,8 +170,10 @@ func (p *Provider) Rename(ctx context.Context, oldKey, newKey string) error {
 		}
 	}
 
-	// Delete failed after retries — remove the copy to avoid orphans.
-	p.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+	// Delete failed after retries — best-effort remove the copy to avoid
+	// orphans. We already have a deleteErr to surface; a cleanup-of-cleanup
+	// failure isn't actionable.
+	_, _ = p.client.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: aws.String(p.bucket),
 		Key:    aws.String(p.fullKey(newKey)),
 	})

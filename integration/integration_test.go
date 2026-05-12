@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/carlos-loya/archive-purge-restore/internal/config"
 	"github.com/carlos-loya/archive-purge-restore/internal/engine"
@@ -148,6 +149,20 @@ func resetMySQL(t *testing.T) {
 	}
 	defer db.Close()
 
+	// MySQL's docker-compose healthcheck can report "healthy" while the
+	// server is still finishing init (granting permissions, running seed
+	// scripts), causing the first real query to fail with EOF. Ping with
+	// backoff until the server actually accepts queries.
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		if err := db.Ping(); err == nil {
+			break
+		} else if time.Now().After(deadline) {
+			t.Fatalf("mysql not ready after 30s: %v", err)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
 	stmts := []string{
 		"SET FOREIGN_KEY_CHECKS = 0",
 		"TRUNCATE TABLE order_items",
@@ -180,7 +195,7 @@ func resetMySQL(t *testing.T) {
 	}
 	for _, s := range stmts {
 		if _, err := db.Exec(s); err != nil {
-			t.Fatalf("reset mysql (%s): %v", s[:40], err)
+			t.Fatalf("reset mysql (%s): %v", s[:min(40, len(s))], err)
 		}
 	}
 }

@@ -24,7 +24,7 @@ type StorageConfig struct {
 	S3         *S3Config       `yaml:"s3,omitempty"`
 	R2         *R2Config       `yaml:"r2,omitempty"`
 	GCS        *GCSConfig      `yaml:"gcs,omitempty"`
-	Filesystem *FSConfig        `yaml:"filesystem,omitempty"`
+	Filesystem *FSConfig       `yaml:"filesystem,omitempty"`
 	Lifecycle  LifecycleConfig `yaml:"lifecycle"`
 }
 
@@ -69,11 +69,11 @@ type HistoryConfig struct {
 
 // Rule defines a single archive configuration rule.
 type Rule struct {
-	Name      string          `yaml:"name"`
-	Schedule  string          `yaml:"schedule"`
-	BatchSize int             `yaml:"batch_size"`
-	Source    SourceConfig    `yaml:"source"`
-	Tables    []TableConfig   `yaml:"tables"`
+	Name      string        `yaml:"name"`
+	Schedule  string        `yaml:"schedule"`
+	BatchSize int           `yaml:"batch_size"`
+	Source    SourceConfig  `yaml:"source"`
+	Tables    []TableConfig `yaml:"tables"`
 }
 
 // SourceConfig defines database connection settings.
@@ -125,12 +125,10 @@ func Load(path string) (*Config, error) {
 	}
 
 	if home, err := os.UserHomeDir(); err == nil {
-		searchPaths = append(searchPaths, filepath.Join(home, ".apr", "config.yaml"), filepath.Join(home, ".apr", "config.yml"),
-		)
+		searchPaths = append(searchPaths, filepath.Join(home, ".apr", "config.yaml"), filepath.Join(home, ".apr", "config.yml"))
 	}
 
-	searchPaths = append(searchPaths, "/etc/apr/config.yaml", "/etc/apr/config.yml",
-	)
+	searchPaths = append(searchPaths, "/etc/apr/config.yaml", "/etc/apr/config.yml")
 
 	for _, p := range searchPaths {
 		if _, err := os.Stat(p); err == nil {
@@ -220,7 +218,7 @@ func (c *Config) Validate() error {
 		}
 		if c.Storage.Filesystem.BasePath == "" {
 			return fmt.Errorf("storage.filesystem.base_path is required")
-	}
+		}
 	default:
 		return fmt.Errorf("unsupported storage type: %s (must be s3, r2, gcs, or filesystem)", c.Storage.Type)
 	}

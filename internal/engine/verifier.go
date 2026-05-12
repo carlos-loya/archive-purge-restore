@@ -142,7 +142,7 @@ func (v *Verifier) verifyFile(ctx context.Context, key string) VerifyFileResult 
 	}
 
 	data, err := io.ReadAll(rc)
-	rc.Close()
+	_ = rc.Close()
 	if err != nil {
 		v.log.Warn("failed to read archive data", "file", key, "error", err)
 		return VerifyFileResult{Key: key, Status: "CORRUPT", Error: fmt.Errorf("reading data: %w", err)}

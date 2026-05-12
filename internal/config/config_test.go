@@ -405,21 +405,21 @@ rules:
 		// Set the environment variable
 		envPath := "/custom/path/history.db"
 		t.Setenv("APR_HISTORY_PATH", envPath)
-		
+
 		cfg, err := Load(path)
 		if err != nil {
 			t.Fatalf("Load() error: %v", err)
 		}
-		
+
 		if cfg.History.Path != envPath {
 			t.Errorf("History.Path = %q, want %q", cfg.History.Path, envPath)
 		}
 	})
-	
+
 	t.Run("config file takes precedence over env var", func(t *testing.T) {
 		// Set env var but also provide config value
 		t.Setenv("APR_HISTORY_PATH", "/env/path/history.db")
-		
+
 		contentWithHistory := content + `
 history:
   path: /config/path/history.db
@@ -428,18 +428,18 @@ history:
 		if err := os.WriteFile(pathWithHistory, []byte(contentWithHistory), 0644); err != nil {
 			t.Fatal(err)
 		}
-		
+
 		cfg, err := Load(pathWithHistory)
 		if err != nil {
 			t.Fatalf("Load() error: %v", err)
 		}
-		
+
 		// Config file should win over env var
 		if cfg.History.Path != "/config/path/history.db" {
 			t.Errorf("History.Path = %q, want %q", cfg.History.Path, "/config/path/history.db")
 		}
 	})
-	
+
 	t.Run("default path when env var is not set", func(t *testing.T) {
 		t.Setenv("APR_HISTORY_PATH", "")
 
@@ -461,12 +461,12 @@ history:
 	t.Run("env var cleaned with filepath.Clean", func(t *testing.T) {
 		// Set a messy path that needs cleaning
 		t.Setenv("APR_HISTORY_PATH", "/custom//path/../path/history.db")
-		
+
 		cfg, err := Load(path)
 		if err != nil {
 			t.Fatalf("Load() error: %v", err)
 		}
-		
+
 		// Should be cleaned
 		expected := "/custom/path/history.db"
 		if cfg.History.Path != expected {

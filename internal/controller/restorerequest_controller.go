@@ -151,7 +151,7 @@ func (r *RestoreRequestReconciler) reconcileJob(
 		return controllerutil.SetControllerReference(rr, job, r.Scheme)
 	})
 	if err != nil {
-		return nil, fmt.Errorf("Job CreateOrUpdate: %w", err)
+		return nil, fmt.Errorf("reconciling Job: %w", err)
 	}
 	if op != controllerutil.OperationResultNone {
 		log.FromContext(ctx).Info("Job reconciled", "name", job.Name, "operation", op)
