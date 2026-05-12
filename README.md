@@ -20,8 +20,11 @@ spec:
 
 ```text
 $ kubectl get archiverule orders-archive
-NAME             TABLE    SCHEDULE    DAYS-ONLINE   LAST-RESULT   ROWS-ARCHIVED   NEXT-RUN
-orders-archive   orders   0 2 * * *   90            Succeeded     14823           2026-05-09T02:00:00Z
+NAME             TABLE    SCHEDULE    DAYS-ONLINE   READY   PROGRESSING   DEGRADED   ROWS-ARCHIVED   NEXT-RUN
+orders-archive   orders   0 2 * * *   90            True    False         False      14823           2026-05-09T02:00:00Z
+
+$ kubectl wait archiverule/orders-archive --for=condition=Ready --timeout=60s
+archiverule.apr.dev/orders-archive condition met
 ```
 
 ## Why APR?

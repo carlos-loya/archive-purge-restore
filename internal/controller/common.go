@@ -57,21 +57,66 @@ const (
 // finished Job don't double-count.
 const AnnotationMetricsEmitted = "apr.dev/metrics-emitted"
 
-// Standard condition types and reasons used across reconcilers.
+// Standard condition types used across reconcilers. These follow the
+// Kubernetes API convention (metav1.Condition) so users can rely on
+// `kubectl wait --for=condition=...` and so generic tooling (ArgoCD, Flux)
+// can interpret resource health.
+//
+// Per-kind vocabulary:
+//
+//	DatabaseConnection / StorageBackend
+//	  Ready          credentials Secret exists with required keys
+//
+//	ArchiveRule
+//	  Ready          rule is configured correctly and not auto-suspended
+//	  ScheduleValid  spec.schedule is a parseable cron expression
+//	  Progressing    an archive Job is currently running
+//	  Degraded       most recent run failed (or consecutive failures > 0)
+//
+//	RestoreRequest
+//	  Ready          request is well-formed and references resolve
+//	  Progressing    Job is running
+//	  Succeeded      Job completed successfully (terminal)
+//	  Failed         Job failed terminally
 const (
-	ConditionReady = "Ready"
+	ConditionReady         = "Ready"
+	ConditionScheduleValid = "ScheduleValid"
+	ConditionProgressing   = "Progressing"
+	ConditionDegraded      = "Degraded"
+	ConditionSucceeded     = "Succeeded"
+	ConditionFailed        = "Failed"
+)
 
+// Standard reasons attached to the conditions above. Reasons are CamelCase
+// machine-readable tokens; the human-readable explanation goes in Message.
+const (
 	ReasonReady                      = "Ready"
 	ReasonDatabaseConnectionNotFound = "DatabaseConnectionNotFound"
 	ReasonStorageBackendNotFound     = "StorageBackendNotFound"
 	ReasonArchiveRuleNotFound        = "ArchiveRuleNotFound"
 	ReasonInvalidSchedule            = "InvalidSchedule"
+	ReasonScheduleParsed             = "ScheduleParsed"
 	ReasonJobReconcileError          = "JobReconcileError"
 	ReasonMaxFailuresReached         = "MaxFailuresReached"
 	ReasonSuspended                  = "Suspended"
 	ReasonSecretNotFound             = "SecretNotFound"
 	ReasonSecretMissingKeys          = "SecretMissingKeys"
 	ReasonNotImplemented             = "NotImplemented"
+
+	// Progressing reasons.
+	ReasonJobActive = "JobActive"
+	ReasonJobIdle   = "JobIdle"
+
+	// Degraded / outcome reasons.
+	ReasonLastRunSucceeded = "LastRunSucceeded"
+	ReasonLastRunFailed    = "LastRunFailed"
+	ReasonConsecutiveFails = "ConsecutiveFailures"
+
+	// RestoreRequest lifecycle reasons.
+	ReasonRestorePending   = "Pending"
+	ReasonRestoreRunning   = "Running"
+	ReasonRestoreSucceeded = "Succeeded"
+	ReasonRestoreFailed    = "Failed"
 )
 
 // Defaults applied to ArchiveRule.spec when the user leaves fields zero.

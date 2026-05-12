@@ -162,6 +162,14 @@ func TestEndToEnd_ArchiveAndRestore(t *testing.T) {
 		t.Error("LastRunRowsArchived = 0; expected old rows to be archived")
 	}
 
+	// Verify the standard metav1.Condition vocabulary that
+	// `kubectl wait --for=condition=...` relies on. Each of these checks
+	// is what a user (or ArgoCD/Flux) would query.
+	requireConditionState(t, finalRule.Status.Conditions, "Ready", metav1.ConditionTrue)
+	requireConditionState(t, finalRule.Status.Conditions, "ScheduleValid", metav1.ConditionTrue)
+	requireConditionState(t, finalRule.Status.Conditions, "Progressing", metav1.ConditionFalse)
+	requireConditionState(t, finalRule.Status.Conditions, "Degraded", metav1.ConditionFalse)
+
 	// Phase 3: rows older than 90 days should be gone from Postgres.
 	afterArchiveCount := countOrders(t, ctx, db)
 	if afterArchiveCount >= initialCount {
@@ -184,6 +192,10 @@ func TestEndToEnd_ArchiveAndRestore(t *testing.T) {
 	if rr.Status.RowsRestored == 0 {
 		t.Error("RowsRestored = 0; expected restore to insert archived rows back")
 	}
+
+	requireConditionState(t, rr.Status.Conditions, "Succeeded", metav1.ConditionTrue)
+	requireConditionState(t, rr.Status.Conditions, "Failed", metav1.ConditionFalse)
+	requireConditionState(t, rr.Status.Conditions, "Progressing", metav1.ConditionFalse)
 
 	// Phase 6: Postgres should be back to the initial row count.
 	afterRestoreCount := countOrders(t, ctx, db)
@@ -418,10 +430,11 @@ func waitForArchiveRuleReady(t *testing.T, ctx context.Context, c client.Client,
 	return &got
 }
 
-// waitForArchiveSucceeded waits until BOTH LastRunResult=Succeeded (set by
-// the Job pod's sink) AND LastJobRef is populated (set by the operator's
-// reconciler when it observes the finished Job). These two writes happen
-// independently; without waiting for both we'd race the reconciler.
+// waitForArchiveSucceeded waits until BOTH the Degraded condition flips to
+// False/LastRunSucceeded (set by the Job pod's sink) AND LastJobRef is
+// populated (set by the operator's reconciler when it observes the
+// finished Job). These two writes happen independently; without waiting
+// for both we'd race the reconciler.
 func waitForArchiveSucceeded(t *testing.T, ctx context.Context, c client.Client, ns, name string, timeout time.Duration) *aprv1alpha1.ArchiveRule {
 	t.Helper()
 	var got aprv1alpha1.ArchiveRule
@@ -429,9 +442,12 @@ func waitForArchiveSucceeded(t *testing.T, ctx context.Context, c client.Client,
 		if err := c.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, &got); err != nil {
 			return false
 		}
-		return got.Status.LastRunResult == aprv1alpha1.ArchiveRunSucceeded &&
+		degraded := apimeta.FindStatusCondition(got.Status.Conditions, "Degraded")
+		return degraded != nil &&
+			degraded.Status == metav1.ConditionFalse &&
+			degraded.Reason == "LastRunSucceeded" &&
 			got.Status.LastJobRef != nil
-	}, fmt.Sprintf("ArchiveRule %s/%s LastRunResult=Succeeded with LastJobRef", ns, name))
+	}, fmt.Sprintf("ArchiveRule %s/%s Degraded=False/LastRunSucceeded with LastJobRef", ns, name))
 	return &got
 }
 
@@ -442,8 +458,9 @@ func waitForRestoreSucceeded(t *testing.T, ctx context.Context, c client.Client,
 		if err := c.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, &got); err != nil {
 			return false
 		}
-		return got.Status.Phase == aprv1alpha1.RestoreSucceeded
-	}, fmt.Sprintf("RestoreRequest %s/%s Phase=Succeeded", ns, name))
+		succeeded := apimeta.FindStatusCondition(got.Status.Conditions, "Succeeded")
+		return succeeded != nil && succeeded.Status == metav1.ConditionTrue
+	}, fmt.Sprintf("RestoreRequest %s/%s Succeeded=True", ns, name))
 	return &got
 }
 
@@ -466,6 +483,23 @@ func triggerArchiveRule(t *testing.T, ctx context.Context, c client.Client, ns, 
 		t.Fatalf("patching trigger annotation: %v", err)
 	}
 	t.Logf("triggered archive rule %s/%s via annotation", ns, name)
+}
+
+// requireConditionState asserts that the named condition is present and
+// has the given Status. This mirrors what `kubectl wait --for=condition=X`
+// checks: the kubectl client side reads the same metav1.Condition slice
+// and matches on Type+Status.
+func requireConditionState(t *testing.T, conds []metav1.Condition, condType string, want metav1.ConditionStatus) {
+	t.Helper()
+	got := apimeta.FindStatusCondition(conds, condType)
+	if got == nil {
+		t.Errorf("expected condition %q, none set; conds=%+v", condType, conds)
+		return
+	}
+	if got.Status != want {
+		t.Errorf("condition %q = %s, want %s (reason=%q, message=%q)",
+			condType, got.Status, want, got.Reason, got.Message)
+	}
 }
 
 func listCronJobs(t *testing.T, ctx context.Context, c client.Client, ns string) []batchv1.CronJob {

@@ -69,8 +69,8 @@ databaseconnection.apr.dev/orders-db  postgres   postgres.data.svc.cluster.local
 NAME                                STATUS   TYPE         BUCKET           READY   AGE
 storagebackend.apr.dev/archive-pvc           filesystem   /var/archives    True    5s
 
-NAME                                    TABLE    SCHEDULE    DAYS-ONLINE   LAST-RESULT   ROWS-ARCHIVED   NEXT-RUN   AGE
-archiverule.apr.dev/orders-archive      orders   0 2 * * *   90                                          ...        5s
+NAME                                    TABLE    SCHEDULE    DAYS-ONLINE   READY   PROGRESSING   DEGRADED   ROWS-ARCHIVED   NEXT-RUN   AGE
+archiverule.apr.dev/orders-archive      orders   0 2 * * *   90            True    False         False                       ...        5s
 ```
 
 If `READY=True` doesn't appear, inspect the resource for the failure
@@ -80,13 +80,13 @@ reason:
 kubectl -n data describe archiverule orders-archive
 ```
 
-The operator creates a `CronJob` named `archiverule-orders-archive` in the
-same namespace. To trigger an immediate run rather than waiting for the
-schedule to fire:
+The operator owns the cron schedule itself and spawns archive `Job`s
+directly (no `CronJob`). To trigger an immediate run rather than waiting
+for the schedule to fire, set the `apr.dev/trigger-time` annotation:
 
 ```bash
-kubectl -n data create job orders-archive-manual \
-  --from=cronjob/archiverule-orders-archive
+kubectl -n data annotate archiverule orders-archive \
+  apr.dev/trigger-time="$(date -u +%Y-%m-%dT%H:%M:%SZ)" --overwrite
 ```
 
 Watch the resulting pod:
@@ -96,12 +96,26 @@ kubectl -n data get jobs,pods
 kubectl -n data logs -l app.kubernetes.io/name=apr,apr.dev/archive-rule=orders-archive
 ```
 
-After the Job completes, the rule's status reflects the run:
+After the Job completes, the rule's status reflects the run via standard
+Kubernetes conditions:
 
 ```bash
 kubectl -n data get archiverule orders-archive
-# NAME              ...  LAST-RESULT  ROWS-ARCHIVED  ...
-# orders-archive    ...  Succeeded    14823          ...
+# NAME              ...  READY  PROGRESSING  DEGRADED  ROWS-ARCHIVED  ...
+# orders-archive    ...  True   False        False     14823          ...
+```
+
+You can wait for any condition with `kubectl wait`:
+
+```bash
+# Wait until configuration is healthy.
+kubectl -n data wait archiverule/orders-archive --for=condition=Ready --timeout=60s
+
+# Wait for an in-flight run to finish.
+kubectl -n data wait archiverule/orders-archive --for=condition=Progressing=False --timeout=10m
+
+# Block on a healthy state (no recent failures).
+kubectl -n data wait archiverule/orders-archive --for=condition=Degraded=False --timeout=60s
 ```
 
 ## Restore on demand
@@ -122,13 +136,43 @@ spec:
 EOF
 ```
 
-Check progress:
+Check progress (lifecycle is exposed via standard conditions —
+`Progressing` flips True while the Job runs, then `Succeeded` or `Failed`
+becomes True at the terminal state):
 
 ```bash
 kubectl -n data get restorerequest
-# NAME                            RULE             DATE         PHASE       ROWS-RESTORED  AGE
-# restore-orders-2026-04-01       orders-archive   2026-04-01   Succeeded   14823          30s
+# NAME                            RULE             DATE         PROGRESSING   SUCCEEDED   FAILED   ROWS-RESTORED  AGE
+# restore-orders-2026-04-01       orders-archive   2026-04-01   False         True        False    14823          30s
 ```
+
+Or block on completion:
+
+```bash
+kubectl -n data wait restorerequest/restore-orders-2026-04-01 \
+  --for=condition=Succeeded --timeout=10m
+```
+
+## Standard conditions
+
+APR follows the Kubernetes API convention of exposing state via
+`metav1.Condition`. The full vocabulary per kind:
+
+| Kind | Condition | Meaning |
+|---|---|---|
+| `DatabaseConnection`, `StorageBackend` | `Ready` | Credentials Secret exists with required keys |
+| `ArchiveRule` | `Ready` | Rule is configured correctly and not auto-suspended |
+| `ArchiveRule` | `ScheduleValid` | `spec.schedule` parses as a cron expression |
+| `ArchiveRule` | `Progressing` | An archive Job is currently running |
+| `ArchiveRule` | `Degraded` | Most recent run failed (or auto-suspended after `maxFailures`) |
+| `RestoreRequest` | `Ready` | Request is well-formed and references resolve |
+| `RestoreRequest` | `Progressing` | Job is running |
+| `RestoreRequest` | `Succeeded` | Job completed successfully (terminal) |
+| `RestoreRequest` | `Failed` | Job failed terminally |
+
+These work transparently with `kubectl wait --for=condition=...` and with
+GitOps tooling like ArgoCD or Flux that interpret `metav1.Condition`s as
+generic resource health.
 
 ## Uninstall
 

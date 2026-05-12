@@ -10,7 +10,6 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -24,8 +23,10 @@ import (
 )
 
 // RestoreRequestReconciler implements one-shot restore execution: each RR
-// owns a Job that runs `apr restore --from-cr`. The Phase field on RR is
-// derived from observed Job state (Pending → Running → Succeeded/Failed).
+// owns a Job that runs `apr restore --from-cr`. Lifecycle is exposed via
+// the standard Conditions: Progressing flips True when the Job is active,
+// then Succeeded or Failed becomes True when the Job reaches a terminal
+// state.
 //
 // Spec is treated as immutable after the Job is created; to re-run a
 // restore, create a new RR. Detecting / rejecting spec mutation is left to
@@ -102,16 +103,12 @@ func (r *RestoreRequestReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		logger.Error(err, "emitting restore metrics")
 	}
 
-	// Reflect Job state into Phase. The sink writes RowsRestored / times
-	// directly from inside the pod; we only manage Phase and JobRef here.
+	// Reflect Job state into Conditions. The sink writes RowsRestored /
+	// times directly from inside the pod; we only manage conditions and
+	// JobRef here.
 	r.applyJobStatus(&rr, job)
-	apimeta.SetStatusCondition(&rr.Status.Conditions, metav1.Condition{
-		Type:               ConditionReady,
-		Status:             metav1.ConditionTrue,
-		Reason:             ReasonReady,
-		Message:            "Job reconciled",
-		ObservedGeneration: rr.Generation,
-	})
+	setCondition(&rr.Status.Conditions, ConditionReady, metav1.ConditionTrue,
+		ReasonReady, "Job reconciled", rr.Generation)
 	rr.Status.ObservedGeneration = rr.Generation
 	if err := r.Status().Update(ctx, &rr); err != nil {
 		if apierrors.IsConflict(err) {
@@ -121,7 +118,7 @@ func (r *RestoreRequestReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	logger.V(1).Info("reconciled RestoreRequest",
-		"job", job.Name, "phase", rr.Status.Phase)
+		"job", job.Name)
 	return ctrl.Result{}, nil
 }
 
@@ -198,24 +195,39 @@ func (r *RestoreRequestReconciler) desiredJobSpec(
 	}
 }
 
-// applyJobStatus derives the RestoreRequest.Phase from the Job's terminal
-// state. The Job pod itself writes RowsRestored / StartTime / CompletionTime
-// via cluster.RecordRestoreResult — those fields are not reflected here.
+// applyJobStatus derives the RestoreRequest's Progressing/Succeeded/Failed
+// conditions from the Job's terminal state. The Job pod itself writes
+// RowsRestored / StartTime / CompletionTime via cluster.RecordRestoreResult
+// — those fields are not reflected here.
+//
+// Conditions are set so that exactly one of Succeeded / Failed is True
+// after the Job terminates (and neither is True until then). Progressing
+// is True only while the Job is actively running.
 func (r *RestoreRequestReconciler) applyJobStatus(rr *aprv1alpha1.RestoreRequest, job *batchv1.Job) {
 	rr.Status.JobRef = &corev1.LocalObjectReference{Name: job.Name}
 
 	switch {
 	case job.Status.Succeeded > 0:
-		rr.Status.Phase = aprv1alpha1.RestoreSucceeded
+		setCondition(&rr.Status.Conditions, ConditionProgressing, metav1.ConditionFalse,
+			ReasonRestoreSucceeded, "restore Job completed successfully", rr.Generation)
+		setCondition(&rr.Status.Conditions, ConditionSucceeded, metav1.ConditionTrue,
+			ReasonRestoreSucceeded, "restore Job completed successfully", rr.Generation)
+		setCondition(&rr.Status.Conditions, ConditionFailed, metav1.ConditionFalse,
+			ReasonRestoreSucceeded, "restore Job completed successfully", rr.Generation)
 	case job.Status.Failed > 0 && jobIsTerminal(job):
 		// Backoff limit exhausted — sink may not have run.
-		rr.Status.Phase = aprv1alpha1.RestoreFailed
+		setCondition(&rr.Status.Conditions, ConditionProgressing, metav1.ConditionFalse,
+			ReasonRestoreFailed, "restore Job failed terminally", rr.Generation)
+		setCondition(&rr.Status.Conditions, ConditionSucceeded, metav1.ConditionFalse,
+			ReasonRestoreFailed, "restore Job failed terminally", rr.Generation)
+		setCondition(&rr.Status.Conditions, ConditionFailed, metav1.ConditionTrue,
+			ReasonRestoreFailed, "restore Job failed terminally", rr.Generation)
 	case job.Status.Active > 0:
-		rr.Status.Phase = aprv1alpha1.RestoreRunning
+		setCondition(&rr.Status.Conditions, ConditionProgressing, metav1.ConditionTrue,
+			ReasonRestoreRunning, fmt.Sprintf("restore Job %q is running", job.Name), rr.Generation)
 	default:
-		if rr.Status.Phase == "" {
-			rr.Status.Phase = aprv1alpha1.RestorePending
-		}
+		setCondition(&rr.Status.Conditions, ConditionProgressing, metav1.ConditionFalse,
+			ReasonRestorePending, "restore Job has not started yet", rr.Generation)
 	}
 }
 
@@ -236,14 +248,12 @@ func (r *RestoreRequestReconciler) markFailed(
 	rr *aprv1alpha1.RestoreRequest,
 	reason, message string,
 ) (ctrl.Result, error) {
-	rr.Status.Phase = aprv1alpha1.RestoreFailed
-	apimeta.SetStatusCondition(&rr.Status.Conditions, metav1.Condition{
-		Type:               ConditionReady,
-		Status:             metav1.ConditionFalse,
-		Reason:             reason,
-		Message:            message,
-		ObservedGeneration: rr.Generation,
-	})
+	setCondition(&rr.Status.Conditions, ConditionReady, metav1.ConditionFalse,
+		reason, message, rr.Generation)
+	setCondition(&rr.Status.Conditions, ConditionFailed, metav1.ConditionTrue,
+		reason, message, rr.Generation)
+	setCondition(&rr.Status.Conditions, ConditionProgressing, metav1.ConditionFalse,
+		reason, message, rr.Generation)
 	rr.Status.ObservedGeneration = rr.Generation
 	if err := r.Status().Update(ctx, rr); err != nil {
 		if apierrors.IsConflict(err) {

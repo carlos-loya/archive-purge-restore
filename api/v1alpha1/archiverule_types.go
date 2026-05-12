@@ -8,16 +8,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// ArchiveRunResult is the terminal state of an archive run.
-// +kubebuilder:validation:Enum=Succeeded;Failed;Running
-type ArchiveRunResult string
-
-const (
-	ArchiveRunSucceeded ArchiveRunResult = "Succeeded"
-	ArchiveRunFailed    ArchiveRunResult = "Failed"
-	ArchiveRunRunning   ArchiveRunResult = "Running"
-)
-
 // AnnotationTriggerTime, when set on an ArchiveRule, requests that the
 // operator fire an immediate archive run regardless of the cron schedule.
 // The annotation value must be RFC3339-formatted; the reconciler tracks
@@ -94,10 +84,6 @@ type ArchiveRuleStatus struct {
 	// +optional
 	LastRunTime *metav1.Time `json:"lastRunTime,omitempty"`
 
-	// LastRunResult is the terminal result of the most recent run.
-	// +optional
-	LastRunResult ArchiveRunResult `json:"lastRunResult,omitempty"`
-
 	// LastRunRowsArchived is the row count from the most recent run.
 	// +optional
 	LastRunRowsArchived int64 `json:"lastRunRowsArchived,omitempty"`
@@ -125,6 +111,13 @@ type ArchiveRuleStatus struct {
 	// +optional
 	ConsecutiveFailures int32 `json:"consecutiveFailures,omitempty"`
 
+	// Conditions report the latest observed state of the rule. Standard types:
+	//
+	//   Ready          rule is configured correctly and not auto-suspended
+	//   ScheduleValid  spec.schedule parses as a cron expression
+	//   Progressing    an archive Job is currently running
+	//   Degraded       most recent run failed (or consecutive failures > 0)
+	//
 	// +optional
 	// +patchMergeKey=type
 	// +patchStrategy=merge
@@ -142,7 +135,9 @@ type ArchiveRuleStatus struct {
 // +kubebuilder:printcolumn:name="Table",type=string,JSONPath=`.spec.table`
 // +kubebuilder:printcolumn:name="Schedule",type=string,JSONPath=`.spec.schedule`
 // +kubebuilder:printcolumn:name="Days-Online",type=integer,JSONPath=`.spec.daysOnline`
-// +kubebuilder:printcolumn:name="Last-Result",type=string,JSONPath=`.status.lastRunResult`
+// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
+// +kubebuilder:printcolumn:name="Progressing",type=string,JSONPath=`.status.conditions[?(@.type=="Progressing")].status`
+// +kubebuilder:printcolumn:name="Degraded",type=string,JSONPath=`.status.conditions[?(@.type=="Degraded")].status`
 // +kubebuilder:printcolumn:name="Rows-Archived",type=integer,JSONPath=`.status.lastRunRowsArchived`
 // +kubebuilder:printcolumn:name="Next-Run",type=date,JSONPath=`.status.nextScheduledTime`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`

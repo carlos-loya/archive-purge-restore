@@ -68,7 +68,7 @@ func RunArchiveFromCR(ctx context.Context, c client.Client, ref string, logger *
 	result, runErr := eng.RunArchive(ctx, ec.Rule.Name, db)
 
 	// Record the outcome regardless of whether the run succeeded; we want
-	// LastRunResult=Failed on failure so users can see it via kubectl.
+	// the Degraded condition flipped on failure so users see it via kubectl.
 	if recErr := RecordArchiveResult(ctx, c, namespace, name, result, runErr); recErr != nil {
 		logger.Error("recording archive result", "error", recErr)
 	}

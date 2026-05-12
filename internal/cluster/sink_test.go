@@ -8,7 +8,11 @@ import (
 	"testing"
 	"time"
 
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	aprv1alpha1 "github.com/carlos-loya/archive-purge-restore/api/v1alpha1"
+	"github.com/carlos-loya/archive-purge-restore/internal/controller"
 	"github.com/carlos-loya/archive-purge-restore/internal/engine"
 )
 
@@ -25,9 +29,7 @@ func TestApplyArchiveResult_Success(t *testing.T) {
 	}
 	applyArchiveResult(rule, result, nil)
 
-	if rule.Status.LastRunResult != aprv1alpha1.ArchiveRunSucceeded {
-		t.Errorf("LastRunResult = %q, want Succeeded", rule.Status.LastRunResult)
-	}
+	requireDegraded(t, rule.Status.Conditions, metav1.ConditionFalse, controller.ReasonLastRunSucceeded)
 	if rule.Status.LastRunRowsArchived != 150 {
 		t.Errorf("LastRunRowsArchived = %d, want 150", rule.Status.LastRunRowsArchived)
 	}
@@ -47,9 +49,7 @@ func TestApplyArchiveResult_RunError(t *testing.T) {
 	}
 	applyArchiveResult(rule, result, errors.New("connection refused"))
 
-	if rule.Status.LastRunResult != aprv1alpha1.ArchiveRunFailed {
-		t.Errorf("LastRunResult = %q, want Failed", rule.Status.LastRunResult)
-	}
+	requireDegraded(t, rule.Status.Conditions, metav1.ConditionTrue, controller.ReasonLastRunFailed)
 	if rule.Status.LastRunRowsArchived != 50 {
 		t.Errorf("partial row count not preserved: %d", rule.Status.LastRunRowsArchived)
 	}
@@ -66,20 +66,16 @@ func TestApplyArchiveResult_PerTableError(t *testing.T) {
 	}
 	applyArchiveResult(rule, result, nil)
 
-	if rule.Status.LastRunResult != aprv1alpha1.ArchiveRunFailed {
-		t.Errorf("any table error should mark the run Failed; got %q", rule.Status.LastRunResult)
-	}
+	requireDegraded(t, rule.Status.Conditions, metav1.ConditionTrue, controller.ReasonLastRunFailed)
 }
 
 func TestApplyArchiveResult_NilResult(t *testing.T) {
 	rule := &aprv1alpha1.ArchiveRule{}
 	applyArchiveResult(rule, nil, errors.New("setup failed before engine ran"))
-	if rule.Status.LastRunResult != aprv1alpha1.ArchiveRunFailed {
-		t.Errorf("nil result with error should be Failed, got %q", rule.Status.LastRunResult)
-	}
+	requireDegraded(t, rule.Status.Conditions, metav1.ConditionTrue, controller.ReasonLastRunFailed)
 }
 
-func TestApplyRestoreResult_WritesDetailsButNotPhase(t *testing.T) {
+func TestApplyRestoreResult_WritesDetailsButNotConditions(t *testing.T) {
 	rr := &aprv1alpha1.RestoreRequest{}
 	start := time.Date(2026, 5, 6, 14, 0, 0, 0, time.UTC)
 	result := &engine.RestoreResult{
@@ -98,16 +94,40 @@ func TestApplyRestoreResult_WritesDetailsButNotPhase(t *testing.T) {
 	if rr.Status.CompletionTime == nil {
 		t.Error("CompletionTime not set")
 	}
-	// Sink must NOT touch Phase — that's the reconciler's responsibility.
-	if rr.Status.Phase != "" {
-		t.Errorf("Phase should be untouched by sink, got %q", rr.Status.Phase)
+	// Sink must NOT touch lifecycle conditions — that's the reconciler's
+	// responsibility (avoids a write race with the Job pod).
+	for _, ct := range []string{controller.ConditionProgressing, controller.ConditionSucceeded, controller.ConditionFailed} {
+		if c := apimeta.FindStatusCondition(rr.Status.Conditions, ct); c != nil {
+			t.Errorf("sink should not touch %s, got %+v", ct, c)
+		}
 	}
 }
 
-func TestApplyRestoreResult_PhaseUntouchedOnError(t *testing.T) {
-	rr := &aprv1alpha1.RestoreRequest{Status: aprv1alpha1.RestoreRequestStatus{Phase: aprv1alpha1.RestoreRunning}}
+func TestApplyRestoreResult_ConditionsUntouchedOnError(t *testing.T) {
+	rr := &aprv1alpha1.RestoreRequest{
+		Status: aprv1alpha1.RestoreRequestStatus{
+			Conditions: []metav1.Condition{{
+				Type:   controller.ConditionProgressing,
+				Status: metav1.ConditionTrue,
+				Reason: controller.ReasonRestoreRunning,
+			}},
+		},
+	}
 	applyRestoreResult(rr, nil, errors.New("database closed connection"), time.Now())
-	if rr.Status.Phase != aprv1alpha1.RestoreRunning {
-		t.Errorf("sink should never touch Phase, got %q", rr.Status.Phase)
+	c := apimeta.FindStatusCondition(rr.Status.Conditions, controller.ConditionProgressing)
+	if c == nil || c.Status != metav1.ConditionTrue {
+		t.Errorf("sink should never touch Progressing, got %+v", c)
+	}
+}
+
+func requireDegraded(t *testing.T, conds []metav1.Condition, status metav1.ConditionStatus, reason string) {
+	t.Helper()
+	c := apimeta.FindStatusCondition(conds, controller.ConditionDegraded)
+	if c == nil {
+		t.Fatalf("Degraded condition not set; conds=%+v", conds)
+	}
+	if c.Status != status || c.Reason != reason {
+		t.Fatalf("Degraded = {Status:%s, Reason:%s}, want {Status:%s, Reason:%s}",
+			c.Status, c.Reason, status, reason)
 	}
 }

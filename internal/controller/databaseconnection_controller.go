@@ -141,23 +141,11 @@ func missingKeys(secret *corev1.Secret, keys ...string) []string {
 }
 
 func setReady(conds *[]metav1.Condition, gen int64, message string) {
-	apimeta.SetStatusCondition(conds, metav1.Condition{
-		Type:               ConditionReady,
-		Status:             metav1.ConditionTrue,
-		Reason:             ReasonReady,
-		Message:            message,
-		ObservedGeneration: gen,
-	})
+	setCondition(conds, ConditionReady, metav1.ConditionTrue, ReasonReady, message, gen)
 }
 
 func setNotReady(conds *[]metav1.Condition, gen int64, reason, message string) {
-	apimeta.SetStatusCondition(conds, metav1.Condition{
-		Type:               ConditionReady,
-		Status:             metav1.ConditionFalse,
-		Reason:             reason,
-		Message:            message,
-		ObservedGeneration: gen,
-	})
+	setCondition(conds, ConditionReady, metav1.ConditionFalse, reason, message, gen)
 }
 
 func isReady(conds []metav1.Condition) bool {

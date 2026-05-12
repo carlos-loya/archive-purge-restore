@@ -28,8 +28,14 @@ spec:
     - jsonPath: .spec.daysOnline
       name: Days-Online
       type: integer
-    - jsonPath: .status.lastRunResult
-      name: Last-Result
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Progressing")].status
+      name: Progressing
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Degraded")].status
+      name: Degraded
       type: string
     - jsonPath: .status.lastRunRowsArchived
       name: Rows-Archived
@@ -173,6 +179,13 @@ spec:
                 type: object
                 x-kubernetes-map-type: atomic
               conditions:
+                description: |-
+                  Conditions report the latest observed state of the rule. Standard types:
+
+                    Ready          rule is configured correctly and not auto-suspended
+                    ScheduleValid  spec.schedule parses as a cron expression
+                    Progressing    an archive Job is currently running
+                    Degraded       most recent run failed (or consecutive failures > 0)
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -258,14 +271,6 @@ spec:
               lastRunID:
                 description: LastRunID is the engine's run ID for the most recent
                   run.
-                type: string
-              lastRunResult:
-                description: LastRunResult is the terminal result of the most recent
-                  run.
-                enum:
-                - Succeeded
-                - Failed
-                - Running
                 type: string
               lastRunRowsArchived:
                 description: LastRunRowsArchived is the row count from the most recent

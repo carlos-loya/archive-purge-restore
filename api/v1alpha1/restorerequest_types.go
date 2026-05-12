@@ -8,17 +8,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// RestorePhase tracks the lifecycle of a one-shot restore.
-// +kubebuilder:validation:Enum=Pending;Running;Succeeded;Failed
-type RestorePhase string
-
-const (
-	RestorePending   RestorePhase = "Pending"
-	RestoreRunning   RestorePhase = "Running"
-	RestoreSucceeded RestorePhase = "Succeeded"
-	RestoreFailed    RestorePhase = "Failed"
-)
-
 // RestoreRequestSpec is immutable after creation. To re-run a restore,
 // create a new RestoreRequest.
 type RestoreRequestSpec struct {
@@ -42,12 +31,10 @@ type RestoreRequestSpec struct {
 	Table string `json:"table,omitempty"`
 }
 
-// RestoreRequestStatus tracks one-shot restore execution.
+// RestoreRequestStatus tracks one-shot restore execution. Lifecycle is
+// expressed via Conditions (the ad-hoc Phase field was removed in favor of
+// the standard metav1.Condition pattern).
 type RestoreRequestStatus struct {
-	// Phase is the lifecycle phase of this restore.
-	// +optional
-	Phase RestorePhase `json:"phase,omitempty"`
-
 	// JobRef points to the Job spawned by this request.
 	// +optional
 	JobRef *corev1.LocalObjectReference `json:"jobRef,omitempty"`
@@ -64,6 +51,17 @@ type RestoreRequestStatus struct {
 	// +optional
 	CompletionTime *metav1.Time `json:"completionTime,omitempty"`
 
+	// Conditions report the latest observed state of the restore. Standard
+	// types:
+	//
+	//   Ready        request is well-formed and references resolve
+	//   Progressing  Job is running
+	//   Succeeded    Job completed successfully (terminal)
+	//   Failed       Job failed terminally
+	//
+	// At most one of Succeeded / Failed will be True at a time, and only
+	// after the Job reaches a terminal state.
+	//
 	// +optional
 	// +patchMergeKey=type
 	// +patchStrategy=merge
@@ -80,7 +78,9 @@ type RestoreRequestStatus struct {
 // +kubebuilder:resource:shortName=rr,categories=apr
 // +kubebuilder:printcolumn:name="Rule",type=string,JSONPath=`.spec.archiveRuleRef.name`
 // +kubebuilder:printcolumn:name="Date",type=string,JSONPath=`.spec.date`
-// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="Progressing",type=string,JSONPath=`.status.conditions[?(@.type=="Progressing")].status`
+// +kubebuilder:printcolumn:name="Succeeded",type=string,JSONPath=`.status.conditions[?(@.type=="Succeeded")].status`
+// +kubebuilder:printcolumn:name="Failed",type=string,JSONPath=`.status.conditions[?(@.type=="Failed")].status`
 // +kubebuilder:printcolumn:name="Rows-Restored",type=integer,JSONPath=`.status.rowsRestored`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
