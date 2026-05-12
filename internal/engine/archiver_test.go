@@ -14,11 +14,11 @@ import (
 
 // mockDB implements database.Provider for testing.
 type mockDB struct {
-	schema    []database.ColumnInfo
-	pkCols    []string
-	rows      []database.Row
-	deleted   [][]any
-	restored  []database.Row
+	schema   []database.ColumnInfo
+	pkCols   []string
+	rows     []database.Row
+	deleted  [][]any
+	restored []database.Row
 }
 
 func (m *mockDB) Connect(ctx context.Context) error { return nil }

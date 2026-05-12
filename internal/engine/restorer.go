@@ -15,10 +15,10 @@ import (
 
 // RestoreOptions specifies what to restore.
 type RestoreOptions struct {
-	Rule   config.Rule
-	Table  string // specific table, or empty for all tables in rule
-	Date   string // YYYY-MM-DD, or empty for all dates
-	RunID  string // specific run ID, or empty for all
+	Rule  config.Rule
+	Table string // specific table, or empty for all tables in rule
+	Date  string // YYYY-MM-DD, or empty for all dates
+	RunID string // specific run ID, or empty for all
 
 	DryRun bool // if true, list files and count rows without inserting
 }
@@ -129,7 +129,7 @@ func (r *Restorer) restoreTable(ctx context.Context, opts RestoreOptions, tbl co
 		}
 
 		data, err := io.ReadAll(rc)
-		rc.Close()
+		_ = rc.Close()
 		if err != nil {
 			return nil, fmt.Errorf("reading archive data %s: %w", obj.Key, err)
 		}

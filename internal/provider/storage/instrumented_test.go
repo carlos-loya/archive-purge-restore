@@ -14,7 +14,7 @@ import (
 // fakeProvider records every method call so the decorator test can
 // confirm the wrapper forwards arguments faithfully.
 type fakeProvider struct {
-	calls []string
+	calls  []string
 	putErr error
 }
 

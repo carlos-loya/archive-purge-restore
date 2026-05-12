@@ -62,7 +62,7 @@ func RunArchiveFromCR(ctx context.Context, c client.Client, ref string, logger *
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	eng := engine.New(ec.Config, store, logger)
 	result, runErr := eng.RunArchive(ctx, ec.Rule.Name, db)
@@ -114,7 +114,7 @@ func RunRestoreFromCR(ctx context.Context, c client.Client, ref string, logger *
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	startTime := time.Now()
 	eng := engine.New(ec.Config, store, logger)

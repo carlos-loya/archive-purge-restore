@@ -11,10 +11,15 @@ CONTROLLER_TOOLS_VERSION := v0.18.0
 ENVTEST := $(LOCALBIN)/setup-envtest
 ENVTEST_VERSION := release-0.24
 ENVTEST_K8S_VERSION := 1.32
+GOLANGCI_LINT := $(LOCALBIN)/golangci-lint
+GOLANGCI_LINT_VERSION := v2.5.0
+GOVULNCHECK := $(LOCALBIN)/govulncheck
+GOVULNCHECK_VERSION := latest
 
-.PHONY: all build build-manager test test-envtest clean lint \
+.PHONY: all build build-manager test test-envtest test-race clean lint vet vuln \
 	dev-up dev-down dev-reset test-integration test-all \
 	manifests generate run-manager controller-gen envtest-tool \
+	golangci-lint-tool govulncheck-tool \
 	docker-build helm-sync-crds helm-lint \
 	kind-tool kind-up kind-down kind-data-plane kind-load kind-install \
 	kind-cert-manager test-k8s test-k8s-clean
@@ -34,8 +39,24 @@ build-manager:
 test:
 	go test ./... -v
 
-lint:
+# test-race runs the unit suite with the data-race detector. CI runs this
+# in addition to plain `test` to catch concurrency bugs.
+test-race:
+	go test -race ./... -v
+
+# lint runs golangci-lint (errcheck, gosimple, govet, ineffassign,
+# staticcheck, unused, misspell, gofmt). Same set CI enforces.
+lint: golangci-lint-tool
+	$(GOLANGCI_LINT) run ./...
+
+# vet is the cheap fallback if you want a quick syntactic check without
+# downloading golangci-lint.
+vet:
 	go vet ./...
+
+# vuln scans dependencies for known CVEs via govulncheck.
+vuln: govulncheck-tool
+	$(GOVULNCHECK) ./...
 
 clean:
 	rm -f $(BINARY) $(MANAGER_BINARY)
@@ -68,6 +89,16 @@ envtest-tool: $(ENVTEST)
 $(ENVTEST):
 	mkdir -p $(LOCALBIN)
 	GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@$(ENVTEST_VERSION)
+
+golangci-lint-tool: $(GOLANGCI_LINT)
+$(GOLANGCI_LINT):
+	mkdir -p $(LOCALBIN)
+	GOBIN=$(LOCALBIN) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+
+govulncheck-tool: $(GOVULNCHECK)
+$(GOVULNCHECK):
+	mkdir -p $(LOCALBIN)
+	GOBIN=$(LOCALBIN) go install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
 
 # test-envtest runs the controller tests against an envtest control plane.
 # setup-envtest will download the kube-apiserver/etcd binaries on first use.

@@ -29,7 +29,7 @@ type gcsClient struct {
 func (c *gcsClient) Put(ctx context.Context, key string, reader io.Reader) error {
 	w := c.bucket.Object(key).NewWriter(ctx)
 	if _, err := io.Copy(w, reader); err != nil {
-		w.Close()
+		_ = w.Close()
 		return err
 	}
 	return w.Close()
@@ -170,7 +170,9 @@ func (p *Provider) Rename(ctx context.Context, oldKey, newKey string) error {
 		}
 	}
 
-	// Delete failed after retries — remove the copy to avoid orphans.
-	p.client.Delete(ctx, p.fullKey(newKey))
+	// Delete failed after retries — best-effort remove the copy to avoid
+	// orphans. We already have a deleteErr to surface; a cleanup-of-cleanup
+	// failure isn't actionable.
+	_ = p.client.Delete(ctx, p.fullKey(newKey))
 	return fmt.Errorf("deleting old key %s after copy (retried %d times): %w", oldKey, maxRetries, deleteErr)
 }

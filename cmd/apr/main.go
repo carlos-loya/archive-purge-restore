@@ -159,7 +159,7 @@ func daemonCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("opening history: %w", err)
 			}
-			defer hist.Close()
+			defer func() { _ = hist.Close() }()
 
 			logger := buildLogger()
 			eng := engine.New(cfg, store, logger)
@@ -175,7 +175,7 @@ func daemonCmd() *cobra.Command {
 					if err := db.Connect(ctx); err != nil {
 						return err
 					}
-					defer db.Close()
+					defer func() { _ = db.Close() }()
 
 					result, archErr := eng.RunArchive(ctx, r.Name, db)
 					recordHistory(hist, result, archErr)
@@ -235,7 +235,7 @@ func archiveCmd() *cobra.Command {
 					if err := db.Connect(ctx); err != nil {
 						return err
 					}
-					defer db.Close()
+					defer func() { _ = db.Close() }()
 
 					result, err := eng.RunArchiveDryRun(ctx, rule.Name, db)
 					if err != nil {
@@ -258,7 +258,7 @@ func archiveCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("opening history: %w", err)
 			}
-			defer hist.Close()
+			defer func() { _ = hist.Close() }()
 
 			if len(args) == 1 {
 				rule := cfg.FindRule(args[0])
@@ -272,7 +272,7 @@ func archiveCmd() *cobra.Command {
 				if err := db.Connect(ctx); err != nil {
 					return err
 				}
-				defer db.Close()
+				defer func() { _ = db.Close() }()
 
 				result, archErr := eng.RunArchive(ctx, rule.Name, db)
 				recordHistory(hist, result, archErr)
@@ -351,7 +351,7 @@ func restoreCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("opening history: %w", err)
 			}
-			defer hist.Close()
+			defer func() { _ = hist.Close() }()
 
 			db, err := makeDBProvider(rule.Source)
 			if err != nil {
@@ -360,7 +360,7 @@ func restoreCmd() *cobra.Command {
 			if err := db.Connect(ctx); err != nil {
 				return err
 			}
-			defer db.Close()
+			defer func() { _ = db.Close() }()
 
 			result, restoreErr := eng.RunRestore(ctx, ruleName, table, date, runID, false, db)
 			recordRestoreHistory(hist, result, restoreErr)
@@ -421,7 +421,7 @@ func verifyCmd() *cobra.Command {
 			// Best-effort history comparison.
 			hist, err := history.NewStore(cfg.History.Path)
 			if err == nil {
-				defer hist.Close()
+				defer func() { _ = hist.Close() }()
 				printHistoryComparison(hist, result)
 			}
 
@@ -452,7 +452,7 @@ func historyCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("opening history: %w", err)
 			}
-			defer hist.Close()
+			defer func() { _ = hist.Close() }()
 
 			events, err := hist.List(rule, limit)
 			if err != nil {
@@ -465,9 +465,9 @@ func historyCmd() *cobra.Command {
 			}
 
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "RUN ID\tRULE\tTYPE\tTABLE\tROWS\tSTATUS\tTIME")
+			_, _ = fmt.Fprintln(w, "RUN ID\tRULE\tTYPE\tTABLE\tROWS\tSTATUS\tTIME")
 			for _, e := range events {
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s\t%s\n",
+				_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s\t%s\n",
 					e.RunID, e.Rule, e.EventType, e.Table, e.RowCount, e.Status,
 					e.StartTime.Format("2006-01-02 15:04:05"))
 			}
@@ -527,7 +527,8 @@ func recordHistory(hist *history.Store, result *engine.RunResult, err error) {
 			errMsg = err.Error()
 		}
 		filesJSON, _ := json.Marshal(t.Files)
-		hist.Record(history.Event{
+		// History is best-effort; a write failure shouldn't fail the run.
+		_ = hist.Record(history.Event{
 			RunID:        result.RunID,
 			Rule:         result.Rule,
 			EventType:    history.EventArchive,
@@ -557,7 +558,8 @@ func recordRestoreHistory(hist *history.Store, result *engine.RestoreResult, err
 			errMsg = err.Error()
 		}
 		filesJSON, _ := json.Marshal(t.Files)
-		hist.Record(history.Event{
+		// History is best-effort; a write failure shouldn't fail the run.
+		_ = hist.Record(history.Event{
 			RunID:        "restore",
 			Rule:         result.Rule,
 			EventType:    history.EventRestore,

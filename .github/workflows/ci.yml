@@ -10,30 +10,85 @@ permissions:
   contents: read
 
 jobs:
-  ci:
-    name: Go ${{ matrix.go-version }}
+  lint:
+    name: Lint (golangci-lint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          cache: true
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.5.0
+          # The action runs golangci-lint itself; we don't need to install it.
+
+  vuln:
+    name: Vulnerability scan (govulncheck)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          cache: true
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - name: Run govulncheck
+        run: govulncheck ./...
+
+  test:
+    name: Unit tests (Go ${{ matrix.go-version }})
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        go-version: ["1.24.x", "1.25.x"]
-
+        go-version: ["1.25.x", "1.26.x"]
     env:
       CGO_ENABLED: "1"
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go-version }}
+          cache: true
+      - name: go test -race
+        run: go test -race ./...
 
-      - name: Vet
-        run: go vet ./...
+  integration:
+    name: Integration tests (Postgres + MySQL + TimescaleDB)
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          cache: true
+      - name: Start databases
+        # docker-compose.yml has healthchecks; --wait blocks until healthy.
+        run: docker compose -f dev/docker-compose.yml up -d --wait
+      - name: Run integration tests
+        run: go test -tags integration ./integration/... -v -timeout 5m
+      - name: Stop databases
+        if: always()
+        run: docker compose -f dev/docker-compose.yml down -v
 
-      - name: Test
-        run: go test ./... -v
-
-      - name: Build
+  build:
+    name: Build binaries
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          cache: true
+      - name: Build apr (CLI)
         run: go build ./cmd/apr
+      - name: Build apr-manager (operator)
+        run: go build ./cmd/manager

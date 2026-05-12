@@ -44,8 +44,8 @@ func ReadParquet(data []byte) ([]database.ColumnInfo, []database.Row, error) {
 		return nil, nil, fmt.Errorf("reading parquet file: %w", err)
 	}
 
-	// Re-read to get schema.
-	reader.Seek(0, io.SeekStart)
+	// Re-read to get schema. bytes.Reader.Seek to a valid offset never errors.
+	_, _ = reader.Seek(0, io.SeekStart)
 	f, err := parquet.OpenFile(reader, int64(len(data)))
 	if err != nil {
 		return nil, nil, fmt.Errorf("opening parquet file for schema: %w", err)

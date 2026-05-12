@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"io"
 
-	s3store "github.com/carlos-loya/archive-purge-restore/internal/provider/storage/s3"
 	"github.com/carlos-loya/archive-purge-restore/internal/provider/storage"
+	s3store "github.com/carlos-loya/archive-purge-restore/internal/provider/storage/s3"
 )
 
 // Provider implements storage.Provider using Cloudflare R2.

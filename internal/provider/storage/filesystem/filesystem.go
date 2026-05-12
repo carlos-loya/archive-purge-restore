@@ -40,7 +40,7 @@ func (p *Provider) Put(_ context.Context, key string, reader io.Reader) error {
 	}
 
 	if _, err := io.Copy(f, reader); err != nil {
-		f.Close()
+		_ = f.Close()
 		os.Remove(path)
 		return fmt.Errorf("writing file %s: %w", key, err)
 	}

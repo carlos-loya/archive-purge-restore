@@ -62,12 +62,12 @@ func (e *Engine) RunArchiveAllDryRun(ctx context.Context, dbFactory func(config.
 			return results, fmt.Errorf("creating database provider for rule %s: %w", rule.Name, err)
 		}
 		if err := db.Connect(ctx); err != nil {
-			db.Close()
+			_ = db.Close()
 			return results, fmt.Errorf("connecting to database for rule %s: %w", rule.Name, err)
 		}
 
 		result, err := e.archiver.ArchiveDryRun(ctx, rule, db)
-		db.Close()
+		_ = db.Close()
 
 		results = append(results, result)
 		if err != nil {
@@ -86,12 +86,12 @@ func (e *Engine) RunArchiveAll(ctx context.Context, dbFactory func(config.Source
 			return results, fmt.Errorf("creating database provider for rule %s: %w", rule.Name, err)
 		}
 		if err := db.Connect(ctx); err != nil {
-			db.Close()
+			_ = db.Close()
 			return results, fmt.Errorf("connecting to database for rule %s: %w", rule.Name, err)
 		}
 
 		result, err := e.archiver.Archive(ctx, rule, db)
-		db.Close()
+		_ = db.Close()
 
 		results = append(results, result)
 		if err != nil {

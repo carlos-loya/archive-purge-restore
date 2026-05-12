@@ -17,11 +17,11 @@ import (
 
 // ArchiveResult contains the result of an archive operation for a single table.
 type ArchiveResult struct {
-	Table       string
+	Table        string
 	RowsArchived int64
 	RowsDeleted  int64
-	Files       []string
-	Error       error
+	Files        []string
+	Error        error
 }
 
 // RunResult contains the overall result of an archive run.
@@ -181,10 +181,10 @@ func (a *Archiver) ArchiveDryRun(ctx context.Context, rule config.Rule, db datab
 				batchCount++
 			}
 			if err := iter.Err(); err != nil {
-				iter.Close()
+				_ = iter.Close()
 				return nil, fmt.Errorf("dry-run table %s: iterating rows: %w", tbl.Name, err)
 			}
-			iter.Close()
+			_ = iter.Close()
 
 			count += int64(batchCount)
 
@@ -244,10 +244,10 @@ func (a *Archiver) archiveTable(ctx context.Context, runID string, rule config.R
 			rows = append(rows, row)
 		}
 		if err := iter.Err(); err != nil {
-			iter.Close()
+			_ = iter.Close()
 			return nil, fmt.Errorf("table %s, batch %d: iterating rows: %w", tbl.Name, batchNum, err)
 		}
-		iter.Close()
+		_ = iter.Close()
 
 		if len(rows) == 0 {
 			break
