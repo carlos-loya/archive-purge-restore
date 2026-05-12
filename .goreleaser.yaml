@@ -1,0 +1,134 @@
+version: 2
+
+project_name: apr
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  # CLI: CGO is required (mattn/go-sqlite3 backs the `apr history` store).
+  # Cross-compiled with zig as the C compiler so a single ubuntu runner
+  # can produce linux/{amd64,arm64} and darwin/{amd64,arm64} binaries.
+  - id: apr
+    main: ./cmd/apr
+    binary: apr
+    env:
+      - CGO_ENABLED=1
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    overrides:
+      - goos: linux
+        goarch: amd64
+        env:
+          - CC=zig cc -target x86_64-linux-musl
+          - CXX=zig c++ -target x86_64-linux-musl
+        ldflags:
+          - -s -w -X main.version={{ .Version }} -linkmode external -extldflags "-static"
+      - goos: linux
+        goarch: arm64
+        env:
+          - CC=zig cc -target aarch64-linux-musl
+          - CXX=zig c++ -target aarch64-linux-musl
+        ldflags:
+          - -s -w -X main.version={{ .Version }} -linkmode external -extldflags "-static"
+      - goos: darwin
+        goarch: amd64
+        env:
+          - CC=zig cc -target x86_64-macos
+          - CXX=zig c++ -target x86_64-macos
+      - goos: darwin
+        goarch: arm64
+        env:
+          - CC=zig cc -target aarch64-macos
+          - CXX=zig c++ -target aarch64-macos
+
+  # Operator: pure-Go (no SQLite import path), linux-only — it runs in
+  # the container image, never standalone.
+  - id: apr-manager
+    main: ./cmd/manager
+    binary: apr-manager
+    env:
+      - CGO_ENABLED=0
+    goos: [linux]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - id: apr-cli
+    ids: [apr]
+    name_template: "apr_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    files:
+      - LICENSE
+      - README.md
+      - CHANGELOG.md
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  use: github
+  sort: asc
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 0
+    - title: Bug fixes
+      regexp: '^.*?fix(\(.+\))??!?:.+$'
+      order: 1
+    - title: Performance
+      regexp: '^.*?perf(\(.+\))??!?:.+$'
+      order: 2
+    - title: Others
+      order: 999
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - '^ci:'
+      - '^refactor:'
+      - '^style:'
+
+dockers_v2:
+  - id: image
+    images:
+      - "ghcr.io/carlos-loya/archive-purge-restore"
+    tags:
+      - "{{ .Version }}"
+      - "latest"
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    dockerfile: Dockerfile.release
+    ids: [apr, apr-manager]
+    labels:
+      org.opencontainers.image.source: https://github.com/carlos-loya/archive-purge-restore
+      org.opencontainers.image.title: "{{ .ProjectName }}"
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.created: "{{ .Date }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      org.opencontainers.image.licenses: MIT
+
+release:
+  github:
+    owner: carlos-loya
+    name: archive-purge-restore
+  draft: false
+  prerelease: auto
+  header: |
+    ## APR {{ .Tag }}
+
+    Container image:
+    ```
+    docker pull ghcr.io/carlos-loya/archive-purge-restore:{{ .Version }}
+    ```
+
+    Helm chart (set `image.tag` to `{{ .Version }}`):
+    ```
+    helm install apr ./charts/apr --set image.tag={{ .Version }}
+    ```

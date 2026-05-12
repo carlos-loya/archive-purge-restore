@@ -1,0 +1,15 @@
+# Release image. GoReleaser builds the binaries on the host (CGO via zig)
+# and supplies them in the build context — this Dockerfile only assembles
+# the runtime layer. For local/dev builds, see ./Dockerfile.
+FROM alpine:3.21
+
+RUN apk add --no-cache ca-certificates tzdata && \
+    addgroup -S apr -g 65532 && \
+    adduser -S apr -G apr -u 65532
+
+COPY apr /apr
+COPY apr-manager /apr-manager
+
+USER 65532:65532
+
+ENTRYPOINT ["/apr"]

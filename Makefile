@@ -115,6 +115,15 @@ IMG ?= ghcr.io/carlos-loya/archive-purge-restore:dev
 docker-build:
 	docker build --build-arg VERSION=$(VERSION) -t $(IMG) .
 
+# release-snapshot exercises the GoReleaser pipeline locally without
+# publishing anything. Requires goreleaser + zig (for CGO cross-compile).
+# Artifacts land in ./dist/.
+release-snapshot:
+	goreleaser release --snapshot --clean --skip=publish
+
+release-check:
+	goreleaser check
+
 # helm-sync-crds copies the controller-gen-generated CRDs into the Helm
 # chart's crds/ directory. Run this any time the CRD types change.
 helm-sync-crds: manifests
