@@ -23,7 +23,10 @@ jobs:
         uses: golangci/golangci-lint-action@v8
         with:
           version: v2.5.0
-          # The action runs golangci-lint itself; we don't need to install it.
+          # Build from source so the linter binary uses Go 1.26 — the
+          # prebuilt v2.5.0 binary is compiled with Go 1.25 and refuses
+          # to lint code whose go.mod targets a newer Go version.
+          install-mode: goinstall
 
   vuln:
     name: Vulnerability scan (govulncheck)
