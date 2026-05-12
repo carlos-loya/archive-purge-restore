@@ -73,6 +73,25 @@ func TestArchiveRule_InvalidSchedule(t *testing.T) {
 
 	got := getArchiveRule(t, ctx, ns, "rule1")
 	requireReady(t, got.Status.Conditions, metav1.ConditionFalse, ReasonInvalidSchedule)
+	requireCondition(t, got.Status.Conditions, ConditionScheduleValid, metav1.ConditionFalse, ReasonInvalidSchedule)
+}
+
+func TestArchiveRule_ValidScheduleSetsScheduleValidTrue(t *testing.T) {
+	requireEnvtest(t)
+	ctx := t.Context()
+	ns := mustCreateNamespace(t, ctx, "ar-good-sched")
+
+	mustCreate(t, ctx, newDatabaseConnection(ns, "dbc1"))
+	mustCreate(t, ctx, newStorageBackend(ns, "sb1"))
+	mustCreate(t, ctx, newArchiveRule(ns, "rule1", "dbc1", "sb1"))
+
+	r := newArchiveRuleReconciler()
+	if _, err := r.Reconcile(ctx, reqFor(ns, "rule1")); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	got := getArchiveRule(t, ctx, ns, "rule1")
+	requireCondition(t, got.Status.Conditions, ConditionScheduleValid, metav1.ConditionTrue, ReasonScheduleParsed)
+	requireCondition(t, got.Status.Conditions, ConditionProgressing, metav1.ConditionFalse, ReasonJobIdle)
 }
 
 // --- Scheduling: do not fire before NextScheduledTime ---
@@ -344,9 +363,7 @@ func TestArchiveRule_FailedJobIncrementsFailures(t *testing.T) {
 	if got.Status.ConsecutiveFailures != 1 {
 		t.Errorf("ConsecutiveFailures = %d, want 1", got.Status.ConsecutiveFailures)
 	}
-	if got.Status.LastRunResult != aprv1alpha1.ArchiveRunFailed {
-		t.Errorf("LastRunResult = %q, want Failed (sink would not have run for crashed pod)", got.Status.LastRunResult)
-	}
+	requireCondition(t, got.Status.Conditions, ConditionDegraded, metav1.ConditionTrue, ReasonLastRunFailed)
 }
 
 func TestArchiveRule_SuccessResetsFailureCount(t *testing.T) {
@@ -383,6 +400,33 @@ func TestArchiveRule_SuccessResetsFailureCount(t *testing.T) {
 	if got.Status.ConsecutiveFailures != 0 {
 		t.Errorf("ConsecutiveFailures = %d, want 0 (most recent Job succeeded)", got.Status.ConsecutiveFailures)
 	}
+	requireCondition(t, got.Status.Conditions, ConditionDegraded, metav1.ConditionFalse, ReasonLastRunSucceeded)
+}
+
+func TestArchiveRule_ProgressingWhenJobActive(t *testing.T) {
+	requireEnvtest(t)
+	ctx := t.Context()
+	ns := mustCreateNamespace(t, ctx, "ar-progressing")
+
+	mustCreate(t, ctx, newDatabaseConnection(ns, "dbc1"))
+	mustCreate(t, ctx, newStorageBackend(ns, "sb1"))
+	mustCreate(t, ctx, newArchiveRule(ns, "rule1", "dbc1", "sb1"))
+
+	r := newArchiveRuleReconciler()
+	if _, err := r.Reconcile(ctx, reqFor(ns, "rule1")); err != nil {
+		t.Fatal(err)
+	}
+	rule := getArchiveRule(t, ctx, ns, "rule1")
+
+	// An unfinished Job → reconciler must report Progressing=True.
+	active := newOwnedJob(t, "active-1", ns, rule)
+	mustCreate(t, ctx, active)
+
+	if _, err := r.Reconcile(ctx, reqFor(ns, "rule1")); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	got := getArchiveRule(t, ctx, ns, "rule1")
+	requireCondition(t, got.Status.Conditions, ConditionProgressing, metav1.ConditionTrue, ReasonJobActive)
 }
 
 func TestArchiveRule_MaxFailuresAutoSuspends(t *testing.T) {
@@ -422,6 +466,7 @@ func TestArchiveRule_MaxFailuresAutoSuspends(t *testing.T) {
 	got := getArchiveRule(t, ctx, ns, "rule1")
 
 	requireReady(t, got.Status.Conditions, metav1.ConditionFalse, ReasonMaxFailuresReached)
+	requireCondition(t, got.Status.Conditions, ConditionDegraded, metav1.ConditionTrue, ReasonMaxFailuresReached)
 	// No new Job should have been spawned (only the 2 failed ones).
 	if jobs := listJobs(t, ctx, ns); len(jobs) != 2 {
 		t.Errorf("expected exactly 2 Jobs (no new fire after auto-suspend), got %d", len(jobs))
@@ -745,12 +790,17 @@ func reqFor(ns, name string) ctrl.Request {
 
 func requireReady(t *testing.T, conds []metav1.Condition, status metav1.ConditionStatus, reason string) {
 	t.Helper()
-	cond := apimeta.FindStatusCondition(conds, ConditionReady)
+	requireCondition(t, conds, ConditionReady, status, reason)
+}
+
+func requireCondition(t *testing.T, conds []metav1.Condition, condType string, status metav1.ConditionStatus, reason string) {
+	t.Helper()
+	cond := apimeta.FindStatusCondition(conds, condType)
 	if cond == nil {
-		t.Fatalf("Ready condition not set")
+		t.Fatalf("%s condition not set; conds=%+v", condType, conds)
 	}
 	if cond.Status != status || cond.Reason != reason {
-		t.Fatalf("Ready condition = {Status:%s, Reason:%s}, want {Status:%s, Reason:%s}",
-			cond.Status, cond.Reason, status, reason)
+		t.Fatalf("%s condition = {Status:%s, Reason:%s}, want {Status:%s, Reason:%s}",
+			condType, cond.Status, cond.Reason, status, reason)
 	}
 }

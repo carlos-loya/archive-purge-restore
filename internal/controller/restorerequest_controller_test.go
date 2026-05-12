@@ -30,9 +30,7 @@ func TestRR_MissingArchiveRule(t *testing.T) {
 	}
 
 	got := getRR(t, ctx, ns, "rr1")
-	if got.Status.Phase != aprv1alpha1.RestoreFailed {
-		t.Errorf("Phase = %q, want Failed", got.Status.Phase)
-	}
+	requireCondition(t, got.Status.Conditions, ConditionFailed, metav1.ConditionTrue, ReasonArchiveRuleNotFound)
 	cond := apimeta.FindStatusCondition(got.Status.Conditions, ConditionReady)
 	if cond == nil || cond.Reason != ReasonArchiveRuleNotFound {
 		t.Errorf("expected Ready=False/%s, got %+v", ReasonArchiveRuleNotFound, cond)
@@ -58,8 +56,13 @@ func TestRR_HappyPathCreatesJob(t *testing.T) {
 	if got.Status.JobRef == nil {
 		t.Fatal("expected status.jobRef set after successful reconcile")
 	}
-	if got.Status.Phase != aprv1alpha1.RestorePending {
-		t.Errorf("Phase = %q, want Pending (Job hasn't started)", got.Status.Phase)
+	// Job hasn't started → Progressing=False/Pending; no terminal condition yet.
+	requireCondition(t, got.Status.Conditions, ConditionProgressing, metav1.ConditionFalse, ReasonRestorePending)
+	if c := apimeta.FindStatusCondition(got.Status.Conditions, ConditionSucceeded); c != nil && c.Status == metav1.ConditionTrue {
+		t.Errorf("Succeeded should not be True before Job runs: %+v", c)
+	}
+	if c := apimeta.FindStatusCondition(got.Status.Conditions, ConditionFailed); c != nil && c.Status == metav1.ConditionTrue {
+		t.Errorf("Failed should not be True before Job runs: %+v", c)
 	}
 
 	var job batchv1.Job
@@ -137,9 +140,9 @@ func TestRR_PhaseReflectsJobSuccess(t *testing.T) {
 		t.Fatalf("reconcile after Job success: %v", err)
 	}
 	got := getRR(t, ctx, ns, "rr1")
-	if got.Status.Phase != aprv1alpha1.RestoreSucceeded {
-		t.Errorf("Phase = %q, want Succeeded after Job.status.Succeeded > 0", got.Status.Phase)
-	}
+	requireCondition(t, got.Status.Conditions, ConditionSucceeded, metav1.ConditionTrue, ReasonRestoreSucceeded)
+	requireCondition(t, got.Status.Conditions, ConditionProgressing, metav1.ConditionFalse, ReasonRestoreSucceeded)
+	requireCondition(t, got.Status.Conditions, ConditionFailed, metav1.ConditionFalse, ReasonRestoreSucceeded)
 }
 
 // --- helpers ---

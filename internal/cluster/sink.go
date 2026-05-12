@@ -9,11 +9,13 @@ import (
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	aprv1alpha1 "github.com/carlos-loya/archive-purge-restore/api/v1alpha1"
+	"github.com/carlos-loya/archive-purge-restore/internal/controller"
 	"github.com/carlos-loya/archive-purge-restore/internal/engine"
 )
 
@@ -24,8 +26,9 @@ import (
 const maxStatusRetries = 5
 
 // RecordArchiveResult patches ArchiveRule.status with the outcome of an
-// engine.RunArchive call. It only touches LastRun* fields — Conditions,
-// CronJobRef, and NextScheduledTime are owned by the operator's reconciler.
+// engine.RunArchive call. It writes the LastRun* fields and the Degraded
+// condition. ScheduleValid, Progressing, Ready, ActiveJobRef, LastJobRef,
+// and NextScheduledTime are owned by the operator's reconciler.
 func RecordArchiveResult(
 	ctx context.Context,
 	c client.Client,
@@ -55,21 +58,45 @@ func applyArchiveResult(rule *aprv1alpha1.ArchiveRule, result *engine.RunResult,
 	rule.Status.LastRunID = result.RunID
 
 	var rows int64
-	tableErr := false
+	var firstTableErr error
 	for _, t := range result.Tables {
 		rows += t.RowsArchived
-		if t.Error != nil {
-			tableErr = true
+		if t.Error != nil && firstTableErr == nil {
+			firstTableErr = t.Error
 		}
 	}
 	rule.Status.LastRunRowsArchived = rows
 
 	switch {
-	case runErr != nil, tableErr:
-		rule.Status.LastRunResult = aprv1alpha1.ArchiveRunFailed
+	case runErr != nil:
+		setCond(&rule.Status.Conditions, controller.ConditionDegraded, metav1.ConditionTrue,
+			controller.ReasonLastRunFailed,
+			fmt.Sprintf("archive run failed: %v", runErr),
+			rule.Generation)
+	case firstTableErr != nil:
+		setCond(&rule.Status.Conditions, controller.ConditionDegraded, metav1.ConditionTrue,
+			controller.ReasonLastRunFailed,
+			fmt.Sprintf("at least one table failed to archive: %v", firstTableErr),
+			rule.Generation)
 	default:
-		rule.Status.LastRunResult = aprv1alpha1.ArchiveRunSucceeded
+		setCond(&rule.Status.Conditions, controller.ConditionDegraded, metav1.ConditionFalse,
+			controller.ReasonLastRunSucceeded,
+			fmt.Sprintf("archive run %q completed successfully (rows=%d)", result.RunID, rows),
+			rule.Generation)
 	}
+}
+
+// setCond is a thin wrapper over apimeta.SetStatusCondition kept local to
+// the sink to avoid pulling more controller-internal helpers into this
+// pod-side codepath.
+func setCond(conds *[]metav1.Condition, condType string, status metav1.ConditionStatus, reason, message string, generation int64) {
+	apimeta.SetStatusCondition(conds, metav1.Condition{
+		Type:               condType,
+		Status:             status,
+		Reason:             reason,
+		Message:            message,
+		ObservedGeneration: generation,
+	})
 }
 
 // RecordRestoreResult patches RestoreRequest.status with the outcome of an
@@ -93,9 +120,10 @@ func RecordRestoreResult(
 }
 
 // applyRestoreResult writes the per-run details of a restore. It does NOT
-// touch RestoreRequest.status.Phase — that field is owned by the operator's
-// RestoreRequestReconciler, which derives it from observed Job state. This
-// avoids a write race between the in-cluster reconciler and the Job pod.
+// touch the lifecycle conditions (Progressing / Succeeded / Failed) —
+// those are owned by the operator's RestoreRequestReconciler, which
+// derives them from observed Job state. This avoids a write race between
+// the in-cluster reconciler and the Job pod.
 func applyRestoreResult(
 	rr *aprv1alpha1.RestoreRequest,
 	result *engine.RestoreResult,

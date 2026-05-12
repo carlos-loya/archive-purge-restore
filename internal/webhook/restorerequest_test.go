@@ -81,7 +81,7 @@ func TestRestoreRequestValidator_StatusOnlyUpdateAllowed(t *testing.T) {
 
 	old := newRR("ns1", "rr1", "rule1")
 	newer := old.DeepCopy()
-	newer.Status.Phase = aprv1alpha1.RestoreSucceeded
+	newer.Status.RowsRestored = 42
 
 	if _, err := v.ValidateUpdate(context.Background(), old, newer); err != nil {
 		t.Errorf("status-only update should be admitted, got %v", err)

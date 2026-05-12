@@ -6,7 +6,10 @@ package controller
 import (
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"sync"
+	"syscall"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -37,38 +40,67 @@ var (
 )
 
 func TestMain(m *testing.M) {
-	if os.Getenv("KUBEBUILDER_ASSETS") != "" {
-		utilruntime.Must(clientgoscheme.AddToScheme(testScheme))
-		utilruntime.Must(aprv1alpha1.AddToScheme(testScheme))
+	// runTests is wrapped so `defer testEnv.Stop()` actually fires — `os.Exit`
+	// in TestMain skips deferred functions, so the previous form leaked the
+	// kube-apiserver/etcd children whenever m.Run() panicked. We also install
+	// a SIGINT/SIGTERM handler so `Ctrl+C` while `make test-envtest` is
+	// running cleans up rather than orphaning the subprocesses.
+	os.Exit(runTests(m))
+}
 
-		repoRoot, err := filepath.Abs("../..")
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "envtest setup: %v\n", err)
-			os.Exit(1)
-		}
-		testEnv = &envtest.Environment{
-			CRDDirectoryPaths:     []string{filepath.Join(repoRoot, "config", "crd", "bases")},
-			ErrorIfCRDPathMissing: true,
-		}
-		cfg, err := testEnv.Start()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "envtest start: %v\n", err)
-			os.Exit(1)
-		}
-		testCfg = cfg
-		testClient, err = client.New(testCfg, client.Options{Scheme: testScheme})
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "envtest client: %v\n", err)
-			os.Exit(1)
-		}
+func runTests(m *testing.M) int {
+	if os.Getenv("KUBEBUILDER_ASSETS") == "" {
+		return m.Run()
 	}
 
-	code := m.Run()
+	utilruntime.Must(clientgoscheme.AddToScheme(testScheme))
+	utilruntime.Must(aprv1alpha1.AddToScheme(testScheme))
 
-	if testEnv != nil {
+	repoRoot, err := filepath.Abs("../..")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "envtest setup: %v\n", err)
+		return 1
+	}
+	testEnv = &envtest.Environment{
+		CRDDirectoryPaths:     []string{filepath.Join(repoRoot, "config", "crd", "bases")},
+		ErrorIfCRDPathMissing: true,
+	}
+	cfg, err := testEnv.Start()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "envtest start: %v\n", err)
+		return 1
+	}
+	testCfg = cfg
+	testClient, err = client.New(testCfg, client.Options{Scheme: testScheme})
+	if err != nil {
 		_ = testEnv.Stop()
+		fmt.Fprintf(os.Stderr, "envtest client: %v\n", err)
+		return 1
 	}
-	os.Exit(code)
+
+	// stopOnce guards against double-Stop from both the deferred path and
+	// the signal-handler path racing on Ctrl+C.
+	var stopOnce sync.Once
+	stop := func() {
+		stopOnce.Do(func() {
+			if err := testEnv.Stop(); err != nil {
+				fmt.Fprintf(os.Stderr, "envtest stop: %v\n", err)
+			}
+		})
+	}
+	defer stop()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		s := <-sigCh
+		fmt.Fprintf(os.Stderr, "envtest: received %s, stopping control plane\n", s)
+		stop()
+		// 128 + signal number is the conventional shell exit code.
+		os.Exit(128 + int(s.(syscall.Signal)))
+	}()
+
+	return m.Run()
 }
 
 // requireEnvtest skips the test if the envtest control plane wasn't started.

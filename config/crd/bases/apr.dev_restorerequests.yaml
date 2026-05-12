@@ -25,8 +25,14 @@ spec:
     - jsonPath: .spec.date
       name: Date
       type: string
-    - jsonPath: .status.phase
-      name: Phase
+    - jsonPath: .status.conditions[?(@.type=="Progressing")].status
+      name: Progressing
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Succeeded")].status
+      name: Succeeded
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Failed")].status
+      name: Failed
       type: string
     - jsonPath: .status.rowsRestored
       name: Rows-Restored
@@ -97,13 +103,27 @@ spec:
             - archiveRuleRef
             type: object
           status:
-            description: RestoreRequestStatus tracks one-shot restore execution.
+            description: |-
+              RestoreRequestStatus tracks one-shot restore execution. Lifecycle is
+              expressed via Conditions (the ad-hoc Phase field was removed in favor of
+              the standard metav1.Condition pattern).
             properties:
               completionTime:
                 description: CompletionTime is when the Job reached a terminal phase.
                 format: date-time
                 type: string
               conditions:
+                description: |-
+                  Conditions report the latest observed state of the restore. Standard
+                  types:
+
+                    Ready        request is well-formed and references resolve
+                    Progressing  Job is running
+                    Succeeded    Job completed successfully (terminal)
+                    Failed       Job failed terminally
+
+                  At most one of Succeeded / Failed will be True at a time, and only
+                  after the Job reaches a terminal state.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -179,14 +199,6 @@ spec:
               observedGeneration:
                 format: int64
                 type: integer
-              phase:
-                description: Phase is the lifecycle phase of this restore.
-                enum:
-                - Pending
-                - Running
-                - Succeeded
-                - Failed
-                type: string
               rowsRestored:
                 description: RowsRestored is the total row count across all restored
                   tables.

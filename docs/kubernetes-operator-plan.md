@@ -144,16 +144,22 @@ spec:
   batchSize: 10000                   # optional, defaults to engine default
   suspend: false                     # mirrors CronJob.spec.suspend
 status:
-  cronJobRef:
-    name: archiverule-orders-archive
+  lastJobRef:
+    name: orders-archive-x7k2p
   lastRunTime: 2026-05-06T02:00:00Z
-  lastRunResult: Succeeded           # Succeeded | Failed | Running
   lastRunRowsArchived: 14823
   lastRunID: 9f3a2b1c
   nextScheduledTime: 2026-05-07T02:00:00Z
+  consecutiveFailures: 0
   conditions:
-    - type: Ready
+    - type: Ready          # rule is configured and not auto-suspended
       status: "True"
+    - type: ScheduleValid  # cron expression parses
+      status: "True"
+    - type: Progressing    # an archive Job is currently running
+      status: "False"
+    - type: Degraded       # most recent run failed (or auto-suspended)
+      status: "False"
 ```
 
 The controller reconciles this into a `CronJob` named `archiverule-{name}` in the same namespace. The Job pod runs `apr archive` against a generated config materialized from the CR plus its referenced `DatabaseConnection` and `StorageBackend`. Credentials are projected as env vars from the referenced Secrets.
@@ -172,15 +178,23 @@ spec:
   date: "2026-04-01"                 # optional filter
   runID: 9f3a2b1c                    # optional filter
 status:
-  phase: Succeeded                   # Pending | Running | Succeeded | Failed
   jobRef:
     name: restorerequest-restore-orders-2026-04-01
   rowsRestored: 14823
   startTime: ...
   completionTime: ...
+  conditions:
+    - type: Ready          # request is well-formed and references resolve
+      status: "True"
+    - type: Progressing    # Job is running
+      status: "False"
+    - type: Succeeded      # Job completed successfully (terminal)
+      status: "True"
+    - type: Failed         # Job failed terminally
+      status: "False"
 ```
 
-The controller reconciles `RestoreRequest` into a one-shot `Job`. After `Job` completion the controller updates `status.phase` and is done — restore requests are immutable; to re-run, create a new CR.
+The controller reconciles `RestoreRequest` into a one-shot `Job`. After `Job` completion the controller flips `Succeeded` or `Failed` to `True` and is done — restore requests are immutable; to re-run, create a new CR.
 
 ### Execution model
 

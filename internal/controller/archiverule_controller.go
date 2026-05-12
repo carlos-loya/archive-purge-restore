@@ -86,9 +86,17 @@ func (r *ArchiveRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	sched, err := cron.ParseStandard(rule.Spec.Schedule)
 	if err != nil {
+		setCondition(&rule.Status.Conditions, ConditionScheduleValid, metav1.ConditionFalse,
+			ReasonInvalidSchedule,
+			fmt.Sprintf("invalid cron expression %q: %v", rule.Spec.Schedule, err),
+			rule.Generation)
 		return r.setNotReady(ctx, &rule, ReasonInvalidSchedule,
 			fmt.Sprintf("invalid cron expression %q: %v", rule.Spec.Schedule, err))
 	}
+	setCondition(&rule.Status.Conditions, ConditionScheduleValid, metav1.ConditionTrue,
+		ReasonScheduleParsed,
+		fmt.Sprintf("cron expression %q parses", rule.Spec.Schedule),
+		rule.Generation)
 
 	ownedJobs, err := r.listOwnedJobs(ctx, &rule)
 	if err != nil {
@@ -168,33 +176,64 @@ func (r *ArchiveRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 	}
 
-	// Set the Ready condition based on our decision.
+	// Set Progressing based on whether a Job is currently running.
+	if active != nil {
+		setCondition(&rule.Status.Conditions, ConditionProgressing, metav1.ConditionTrue,
+			ReasonJobActive,
+			fmt.Sprintf("archive Job %q is running", active.Name),
+			rule.Generation)
+	} else {
+		setCondition(&rule.Status.Conditions, ConditionProgressing, metav1.ConditionFalse,
+			ReasonJobIdle,
+			"no archive Job is currently running",
+			rule.Generation)
+	}
+
+	// Set Degraded:
+	//   - True/MaxFailuresReached when auto-suspended.
+	//   - True/LastRunFailed when the most recent finished Job failed (set
+	//     here defensively so users see Degraded even if the sink in the
+	//     Job pod did not run, e.g. crashed pod).
+	//   - False/LastRunSucceeded when the most recent finished Job succeeded.
+	//   - Otherwise leave alone (no finished Jobs yet → no signal).
 	switch {
 	case autoSuspended:
-		apimeta.SetStatusCondition(&rule.Status.Conditions, metav1.Condition{
-			Type:               ConditionReady,
-			Status:             metav1.ConditionFalse,
-			Reason:             ReasonMaxFailuresReached,
-			Message: fmt.Sprintf("ConsecutiveFailures=%d reached MaxFailures=%d; clear the annotation %s or fix the underlying cause to resume",
+		setCondition(&rule.Status.Conditions, ConditionDegraded, metav1.ConditionTrue,
+			ReasonMaxFailuresReached,
+			fmt.Sprintf("ConsecutiveFailures=%d reached MaxFailures=%d", rule.Status.ConsecutiveFailures, failureLimit),
+			rule.Generation)
+	case lastFinished != nil && !didJobSucceed(lastFinished):
+		setCondition(&rule.Status.Conditions, ConditionDegraded, metav1.ConditionTrue,
+			ReasonLastRunFailed,
+			fmt.Sprintf("most recent archive Job %q failed", lastFinished.Name),
+			rule.Generation)
+	case lastFinished != nil && didJobSucceed(lastFinished):
+		setCondition(&rule.Status.Conditions, ConditionDegraded, metav1.ConditionFalse,
+			ReasonLastRunSucceeded,
+			fmt.Sprintf("most recent archive Job %q succeeded", lastFinished.Name),
+			rule.Generation)
+	}
+
+	// Set Ready last — it summarizes the rule's overall configuration
+	// health. Auto-suspend flips Ready=False because no further runs will
+	// be scheduled until a manual fix.
+	switch {
+	case autoSuspended:
+		setCondition(&rule.Status.Conditions, ConditionReady, metav1.ConditionFalse,
+			ReasonMaxFailuresReached,
+			fmt.Sprintf("ConsecutiveFailures=%d reached MaxFailures=%d; clear the annotation %s or fix the underlying cause to resume",
 				rule.Status.ConsecutiveFailures, failureLimit, aprv1alpha1.AnnotationTriggerTime),
-			ObservedGeneration: rule.Generation,
-		})
+			rule.Generation)
 	case rule.Spec.Suspend:
-		apimeta.SetStatusCondition(&rule.Status.Conditions, metav1.Condition{
-			Type:               ConditionReady,
-			Status:             metav1.ConditionTrue,
-			Reason:             ReasonSuspended,
-			Message:            "rule suspended by spec.suspend",
-			ObservedGeneration: rule.Generation,
-		})
+		setCondition(&rule.Status.Conditions, ConditionReady, metav1.ConditionTrue,
+			ReasonSuspended,
+			"rule suspended by spec.suspend",
+			rule.Generation)
 	default:
-		apimeta.SetStatusCondition(&rule.Status.Conditions, metav1.Condition{
-			Type:               ConditionReady,
-			Status:             metav1.ConditionTrue,
-			Reason:             ReasonReady,
-			Message:            "rule scheduled",
-			ObservedGeneration: rule.Generation,
-		})
+		setCondition(&rule.Status.Conditions, ConditionReady, metav1.ConditionTrue,
+			ReasonReady,
+			"rule scheduled",
+			rule.Generation)
 	}
 	rule.Status.ObservedGeneration = rule.Generation
 
@@ -333,12 +372,12 @@ func countConsecutiveFailures(jobs []batchv1.Job) int32 {
 // Conventions:
 //
 //   - The Job pod's sink (cluster.RecordArchiveResult) is the source of
-//     truth for LastRunResult/LastRunRowsArchived/LastRunID/LastRunTime
-//     when the engine actually ran. The reconciler does NOT touch those
-//     fields on a successful Job.
+//     truth for LastRunRowsArchived/LastRunID/LastRunTime AND for the
+//     Degraded condition when the engine actually ran.
 //   - When a Job terminated with Failed and the sink may not have run
-//     (pod crashed before the engine returned), we override
-//     LastRunResult to Failed so users see the correct outcome.
+//     (pod crashed before the engine returned), the reconciler still
+//     advances LastRunTime so users see the failed run, and the main
+//     Reconcile loop sets Degraded=True/LastRunFailed.
 //   - LastJobRef and ActiveJobRef are owned by the reconciler.
 func (r *ArchiveRuleReconciler) applyJobStatus(rule *aprv1alpha1.ArchiveRule, active, lastFinished *batchv1.Job) {
 	if active != nil {
@@ -348,12 +387,9 @@ func (r *ArchiveRuleReconciler) applyJobStatus(rule *aprv1alpha1.ArchiveRule, ac
 	}
 	if lastFinished != nil {
 		rule.Status.LastJobRef = &corev1.LocalObjectReference{Name: lastFinished.Name}
-		if !didJobSucceed(lastFinished) {
-			rule.Status.LastRunResult = aprv1alpha1.ArchiveRunFailed
-			if lastFinished.Status.StartTime != nil &&
-				(rule.Status.LastRunTime == nil || lastFinished.Status.StartTime.Time.After(rule.Status.LastRunTime.Time)) {
-				rule.Status.LastRunTime = lastFinished.Status.StartTime
-			}
+		if !didJobSucceed(lastFinished) && lastFinished.Status.StartTime != nil &&
+			(rule.Status.LastRunTime == nil || lastFinished.Status.StartTime.Time.After(rule.Status.LastRunTime.Time)) {
+			rule.Status.LastRunTime = lastFinished.Status.StartTime
 		}
 	}
 }
@@ -494,13 +530,8 @@ func (r *ArchiveRuleReconciler) setNotReady(
 	rule *aprv1alpha1.ArchiveRule,
 	reason, message string,
 ) (ctrl.Result, error) {
-	apimeta.SetStatusCondition(&rule.Status.Conditions, metav1.Condition{
-		Type:               ConditionReady,
-		Status:             metav1.ConditionFalse,
-		Reason:             reason,
-		Message:            message,
-		ObservedGeneration: rule.Generation,
-	})
+	setCondition(&rule.Status.Conditions, ConditionReady, metav1.ConditionFalse,
+		reason, message, rule.Generation)
 	rule.Status.ObservedGeneration = rule.Generation
 	if err := r.Status().Update(ctx, rule); err != nil {
 		if apierrors.IsConflict(err) {
@@ -509,6 +540,20 @@ func (r *ArchiveRuleReconciler) setNotReady(
 		return ctrl.Result{}, fmt.Errorf("updating status: %w", err)
 	}
 	return ctrl.Result{RequeueAfter: requeueWhileBusy}, nil
+}
+
+// setCondition is a thin wrapper over apimeta.SetStatusCondition that
+// keeps reconciler call sites short. ObservedGeneration is taken from the
+// caller-supplied generation so the condition reflects the spec the
+// reconciler actually saw.
+func setCondition(conds *[]metav1.Condition, condType string, status metav1.ConditionStatus, reason, message string, generation int64) {
+	apimeta.SetStatusCondition(conds, metav1.Condition{
+		Type:               condType,
+		Status:             status,
+		Reason:             reason,
+		Message:            message,
+		ObservedGeneration: generation,
+	})
 }
 
 func triggerSource(manual, scheduled bool) string {

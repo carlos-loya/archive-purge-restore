@@ -103,14 +103,14 @@ internal/
     databaseconnection_controller.go     # validates referenced Secret exists with expected keys
     storagebackend_controller.go         # same, type-aware (filesystem needs none)
     archiverule_controller.go            # in-controller cron + Job spawn + failure tracking + history pruning
-    restorerequest_controller.go         # spawns one-shot Job, derives Phase from Job state
+    restorerequest_controller.go         # spawns one-shot Job, derives lifecycle conditions from Job state
     jobspec.go                           # buildJobEnv shared between archive CronJob and restore Job
     metrics_emit.go                      # emits archive/restore_runs_total when Job becomes terminal
 
   cluster/                               # K8s-aware glue between operator and engine — used by Job pods only
     client.go                            # NewClient: in-cluster or kubeconfig
     translate.go                         # CR → engine config (with env-var credential resolution)
-    sink.go                              # patches CR status from inside the Job pod (LastRunResult, etc.)
+    sink.go                              # patches CR status from inside the Job pod (rows, runID, Degraded condition)
     run.go                               # RunArchiveFromCR / RunRestoreFromCR orchestrators
 
   webhook/                               # Validating admission webhook handlers (controller-runtime CustomValidator[T])
@@ -199,8 +199,8 @@ batch-INSERT into the database.
 |---|---|---|
 | `DatabaseConnection` | engine, host, port, database, sslMode, credentialsSecretRef | Ready condition |
 | `StorageBackend` | type (s3/r2/gcs/filesystem), bucket, region, prefix, endpoint, accountID, credentialsSecretRef | Ready condition |
-| `ArchiveRule` | databaseRef, storageRef, table, dateColumn, daysOnline, schedule, batchSize, suspend, maxFailures, historyLimit | activeJobRef, lastJobRef, lastRunResult, lastRunRowsArchived, lastRunID, lastRunTime, nextScheduledTime, lastTriggerTime, consecutiveFailures, conditions |
-| `RestoreRequest` | archiveRuleRef, date, runID, table | phase, jobRef, rowsRestored, startTime, completionTime, conditions |
+| `ArchiveRule` | databaseRef, storageRef, table, dateColumn, daysOnline, schedule, batchSize, suspend, maxFailures, historyLimit | activeJobRef, lastJobRef, lastRunRowsArchived, lastRunID, lastRunTime, nextScheduledTime, lastTriggerTime, consecutiveFailures, conditions (Ready/ScheduleValid/Progressing/Degraded) |
+| `RestoreRequest` | archiveRuleRef, date, runID, table | jobRef, rowsRestored, startTime, completionTime, conditions (Ready/Progressing/Succeeded/Failed) |
 
 Annotation: `apr.dev/trigger-time` (RFC3339) on an ArchiveRule fires an
 immediate run on the next reconcile, deduplicated against
